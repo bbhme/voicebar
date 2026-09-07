@@ -1,0 +1,7 @@
+cadu|piper|cadu|Cadu · Piper
+faber|piper|faber|Faber · Piper
+jeff|piper|jeff|Jeff · Piper
+edresson|piper|edresson|Edresson · Piper
+dora|kokoro|pf_dora|Dora · Kokoro (feminina)
+alex|kokoro|pm_alex|Alex · Kokoro
+santa|kokoro|pm_santa|Santa · Kokoro

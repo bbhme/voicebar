@@ -1,0 +1,156 @@
+#!/bin/bash
+# Controle da voz do Claude Code. Uso: voice <comando>
+V="$HOME/.claude/voice"; R="$V/run"; PIDF="$R/play.pid"; OFF="$HOME/.claude/hooks/voice.off"
+mkdir -p "$R"
+bar(){ b=$(cat "$R/bar.pid" 2>/dev/null); [ -n "$b" ] && kill -0 "$b" 2>/dev/null && echo "$b"; }
+send(){ echo "$*" > "$R/cmd"; }
+pid(){ [ -f "$PIDF" ] && p=$(cat "$PIDF" 2>/dev/null) && kill -0 "$p" 2>/dev/null && echo "$p"; }
+st(){ p=$(pid); [ -z "$p" ] && { echo parado; return; }
+      s=$(ps -o stat= -p "$p" 2>/dev/null); case "$s" in *T*) echo pausado;; *) echo tocando;; esac; }
+
+case "${1:-status}" in
+  pause)  [ -n "$(bar)" ] && { send pause; echo pausado; exit 0; }
+          p=$(pid); [ -n "$p" ] && kill -STOP "$p" && echo "pausado" || echo "nada tocando";;
+  resume|cont) [ -n "$(bar)" ] && { send resume; echo retomado; exit 0; }
+          p=$(pid); [ -n "$p" ] && kill -CONT "$p" && echo "retomado" || echo "nada pausado";;
+  toggle) [ -n "$(bar)" ] && { send toggle; echo alternado; exit 0; }
+          p=$(pid); [ -z "$p" ] && { echo "nada tocando"; exit 0; }
+          if [ "$(st)" = pausado ]; then kill -CONT "$p"; echo retomado; else kill -STOP "$p"; echo pausado; fi;;
+  skip|pular) [ -n "$(bar)" ] && { send skip; echo "pulou"; exit 0; }; echo "app da barra nao esta rodando";;
+  clear|limpar) [ -n "$(bar)" ] && { send clear; echo "fila limpa"; exit 0; }
+          find "$R/q" -name '*.job' -delete 2>/dev/null; echo "fila limpa";;
+  pick|ouvir) n="$2"; [ -z "$n" ] && { echo "uso: voice pick <numero da fila>"; exit 1; }
+          [ -n "$(bar)" ] && { send pick "$n"; echo "tocando o item $n (o atual volta para a fila)"; exit 0; }
+          echo "app da barra nao esta rodando";;
+  queue|fila) n=$(find "$R/q" -name '*.job' 2>/dev/null | wc -l | tr -d ' ')
+          echo "na fila: $n"
+          for f in $(ls -t "$R/q"/*.job 2>/dev/null); do echo "  $(grep '^proj=' $f | cut -d= -f2)"; done;;
+  mute|silenciar) [ -z "$2" ] && { echo "silenciados:"; sed 's/^/  /' "$V/muted.txt" 2>/dev/null; exit 0; }
+          grep -qxF "$2" "$V/muted.txt" 2>/dev/null || echo "$2" >> "$V/muted.txt"; echo "$2 silenciado";;
+  unmute|ativar) [ -z "$2" ] && { : > "$V/muted.txt"; echo "todos ativados"; exit 0; }
+          grep -vxF "$2" "$V/muted.txt" > "$V/.m" 2>/dev/null; mv "$V/.m" "$V/muted.txt"; echo "$2 ativado";;
+  mode|modo) [ -z "$2" ] && { echo "modo atual: $(cat $V/mode 2>/dev/null)"; exit 0; }
+          case "$2" in fila|ultima) echo "$2" > "$V/mode"; echo "modo: $2";; *) echo "use: fila | ultima";; esac;;
+  projects|projetos) echo "projetos vistos (e o que cada um fala):"
+          while read -r p; do
+            [ -z "$p" ] && continue
+            L=$(grep "^$p|" "$V/labels.txt" 2>/dev/null | head -1 | cut -d'|' -f2-)
+            [ -z "$L" ] && L=$(printf '%s' "$p" | tr '_.-' '   ' | sed 's/  */ /g; s/^ //; s/ $//')
+            M=$(grep -qxF "$p" "$V/muted.txt" 2>/dev/null && echo " [mudo]")
+            printf "  %-24s \"%s\"%s\n" "$p" "$L" "$M"
+          done < "$V/projects.txt" 2>/dev/null;;
+  legenda|label) p="$2"
+          [ -z "$p" ] && { echo "o que cada projeto fala:"; sed 's/|/  ->  /;s/^/  /' "$V/labels.txt" 2>/dev/null
+                           [ -s "$V/labels.txt" ] || echo "  (nenhuma legenda; todos usam o nome da pasta)"; exit 0; }
+          shift 2; t="$*"
+          grep -v "^$p|" "$V/labels.txt" 2>/dev/null > "$V/.l"; mv "$V/.l" "$V/labels.txt"
+          if [ -z "$t" ] || [ "$t" = "limpar" ]; then echo "$p volta a falar o nome da pasta"
+          else printf '%s|%s\n' "$p" "$t" >> "$V/labels.txt"; echo "$p passa a falar: \"$t\""; fi;;
+  stop)   [ -n "$(bar)" ] && { send stop; echo parado; exit 0; }
+          p=$(pid); [ -n "$p" ] && { kill -CONT "$p" 2>/dev/null; kill "$p" 2>/dev/null; }
+          rm -f "$PIDF"; echo "parado";;
+  vol)    v="$2"; [ -z "$v" ] && { echo "volume atual: $(cat $V/volume 2>/dev/null)"; exit 0; }
+          echo "$v" > "$V/volume"; [ -n "$(bar)" ] && send vol "$v"; echo "volume: $v";;
+  speed|vel) v="$2"; [ -z "$v" ] && { echo "velocidade atual: $(cat $V/speed 2>/dev/null || echo 1.0)"; exit 0; }
+          echo "$v" > "$V/speed"; [ -n "$(bar)" ] && send speed "$v"; echo "velocidade: ${v}x";;
+  announce|anuncio) case "$2" in
+            on|1)  echo 1 > "$V/announce"; echo "anúncio ligado";;
+            off|0) echo 0 > "$V/announce"; echo "anúncio desligado";;
+            *) echo "anúncio: $([ "$(cat $V/announce 2>/dev/null||echo 1)" = 1 ] && echo ligado || echo desligado)";;
+          esac;;
+  pausa) case "$2" in
+            sem|curta|media|média|longa) echo "${2/média/media}" > "$V/pause"; echo "pausa: ${2}";;
+            *) echo "pausa atual: $(cat $V/pause 2>/dev/null || echo media)"
+               echo "opções: sem | curta | media | longa";;
+          esac;;
+  resumo|summary)
+          C="$V/summary.conf"
+          put(){ grep -v "^$1=" "$C" 2>/dev/null > "$V/.c"; echo "$1=$2" >> "$V/.c"; sort "$V/.c" > "$C"; rm -f "$V/.c"; }
+          get2(){ grep "^$1=" "$C" 2>/dev/null | head -1 | cut -d= -f2-; }
+          case "$2" in
+            on|1)   put enabled 1; echo "resumo ligado";;
+            off|0)  put enabled 0; echo "resumo desligado";;
+            pct|%)  [ -z "$3" ] && { echo "redução atual: $(get2 percent)%"; exit 0; }
+                    put mode percent; put percent "${3%\%}"; echo "reduzir em ${3%\%}%";;
+            palavras|words) [ -z "$3" ] && { echo "alvo atual: $(get2 words) palavras"; exit 0; }
+                    put mode words; put words "$3"; echo "resumir em $3 palavras";;
+            min)    [ -z "$3" ] && { echo "mínimo atual: $(get2 min_words) palavras"; exit 0; }
+                    put min_words "$3"; echo "só resume acima de $3 palavras";;
+            modelo|model) [ -z "$3" ] && { echo "modelo atual: $(get2 model)"; exit 0; }
+                    put model "$3"; echo "modelo: $3";;
+            modelos|models) sed 's/^/  /' "$V/models.txt" 2>/dev/null || echo "  (use Buscar na janela Resumo por IA)";;
+            prompt|instrucoes|instruções)
+                    P="$V/summary_prompt.txt"
+                    case "$3" in
+                      "")      if [ -s "$P" ]; then echo "instruções para a IA:"; sed 's/^/  /' "$P"
+                               else echo "nenhuma instrução definida"; fi;;
+                      limpar|clear) : > "$P"; echo "instruções apagadas";;
+                      -)       cat > "$P"; echo "instruções lidas da entrada padrão";;
+                      *)       shift 2; printf '%s\n' "$*" > "$P"; echo "instruções salvas";;
+                    esac;;
+            *) echo "resumo : $([ "$(get2 enabled)" = 1 ] && echo ligado || echo desligado)"
+               echo "modo   : $([ "$(get2 mode)" = words ] && echo "$(get2 words) palavras" || echo "reduzir $(get2 percent)%")"
+               echo "mínimo : $(get2 min_words) palavras"
+               echo "modelo : $(get2 model)"
+               echo "chave  : $([ -s "$V/openai.env" ] && echo guardada || echo ausente)";;
+          esac;;
+  off)    touch "$OFF"; p=$(pid); [ -n "$p" ] && { kill -CONT "$p" 2>/dev/null; kill "$p" 2>/dev/null; }
+          echo "voz DESLIGADA";;
+  on)     rm -f "$OFF"; echo "voz LIGADA";;
+  use)    v="$2"; grep -q "^$v|" "$V/voices.txt" || { echo "voz '$v' não existe. veja: voice list"; exit 1; }
+          echo "$v" > "$V/current"; echo "voz agora: $v";;
+  list)   echo "vozes disponíveis:"; awk -F'|' '{printf "  %-10s %s\n",$1,$4}' "$V/voices.txt"
+          echo "atual: $(cat $V/current 2>/dev/null)";;
+  say)    shift; t="$*"; [ -z "$t" ] && { echo "uso: voice say \"texto\""; exit 1; }
+          "$V/synth.sh" "$(cat $V/current)" "$R/say.wav" <<< "$t" || exit 1
+          afplay -v "$(cat $V/volume 2>/dev/null || echo 1)" "$R/say.wav";;
+  bar)    b=$(bar); [ -n "$b" ] && echo "app da barra rodando (pid $b)" || { nohup "$V/voicebar" >/dev/null 2>&1 & disown; sleep 1; echo "app da barra iniciado"; };;
+  status) [ -n "$(bar)" ] && echo "estado : $(cat $R/../current >/dev/null; echo controlado pelo app da barra)" || echo "estado : $(st)"
+          echo "voz    : $(cat $V/current 2>/dev/null)"
+          echo "volume : $(cat $V/volume 2>/dev/null)"
+          echo "veloc. : $(cat $V/speed 2>/dev/null || echo 1.0)x"
+          echo "modo   : $(cat $V/mode 2>/dev/null)"
+          echo "anúncio: $([ "$(cat $V/announce 2>/dev/null||echo 1)" = 1 ] && echo ligado || echo desligado)"
+          echo "fila   : $(find "$R/q" -name '*.job' 2>/dev/null | wc -l | tr -d ' ')"
+          m=$(tr '\n' ' ' < "$V/muted.txt" 2>/dev/null); [ -n "$m" ] && echo "mudos  : $m"
+          [ -f "$OFF" ] && echo "hook   : DESLIGADO (voice on para religar)" || echo "hook   : ligado";;
+  *) echo "Controle da voz do Claude Code.  Uso: voice <comando> [valor]"
+     echo "Sem valor, cada comando mostra o ajuste atual."
+     echo
+     echo "REPRODUÇÃO"
+     echo "  pause | resume | toggle      pausa, retoma, alterna"
+     echo "  skip                         pula a fala atual e chama a próxima"
+     echo "  stop                         descarta a fala atual"
+     echo "  clear                        esvazia a fila sem cortar a atual"
+     echo
+     echo "SOM"
+     echo "  vol <0-1>                    volume, vale no meio da frase"
+     echo "  speed <0.6-1.8>              velocidade, sem alterar o tom"
+     echo "  use <voz> | list             troca e lista as sete vozes"
+     echo
+     echo "FILA E PROJETOS"
+     echo "  fila                         quem está tocando e quem espera"
+     echo "  pick <n>                     ouve o item n; o atual volta para a fila"
+     echo "  mode <fila|ultima>           enfileirar tudo ou só a mais recente"
+     echo "  mute <proj> | unmute [proj]  silencia ou reativa um projeto"
+     echo "  projetos                     lista os projetos já vistos"
+     echo
+     echo "ANÚNCIO E PAUSAS"
+     echo "  announce <on|off>            falar a origem antes da leitura"
+     echo "  pausa <sem|curta|media|longa>  silêncio ao trocar de projeto"
+     echo
+     echo "RESUMO POR IA"
+     echo "  resumo                       estado completo"
+     echo "  resumo <on|off>              liga e desliga"
+     echo "  resumo pct <n>               reduzir em n por cento"
+     echo "  resumo palavras <n>          alvo fixo de n palavras"
+     echo "  resumo min <n>               não resumir abaixo de n palavras"
+     echo "  resumo modelo <nome>         escolhe o modelo"
+     echo "  resumo modelos               lista os modelos buscados"
+     echo
+     echo "GERAL"
+     echo "  on | off                     liga e desliga a leitura das respostas"
+     echo "  say <texto>                  fala um texto agora"
+     echo "  bar                          inicia o app da barra se estiver fechado"
+     echo "  status                       resumo de tudo";;
+esac
