@@ -142,13 +142,20 @@ Tudo isso também funciona pelo terminal, com o comando voice.
 
 /// Atalhos globais oferecidos. A tecla e os modificadores usam a API Carbon,
 /// que registra um atalho de sistema sem exigir permissão de acessibilidade.
-let ATALHOS: [(id: String, rotulo: String, tecla: UInt32, mods: UInt32)] = [
-  ("^~p",  "Control Option P",          UInt32(kVK_ANSI_P),     UInt32(controlKey | optionKey)),
-  ("^@p",  "Control Comando P",         UInt32(kVK_ANSI_P),     UInt32(controlKey | cmdKey)),
-  ("^~space", "Control Option Espaço",  UInt32(kVK_Space),      UInt32(controlKey | optionKey)),
-  ("f13",  "F13",                       UInt32(kVK_F13),        0),
-  ("^~@p", "Control Option Comando P",  UInt32(kVK_ANSI_P),     UInt32(controlKey | optionKey | cmdKey)),
-  ("nenhum", "Sem atalho",              0,                      0),
+let ATALHOS: [(id: String, rotulo: String, tecla: UInt32, mods: UInt32,
+               eq: String, eqMods: NSEvent.ModifierFlags)] = [
+  ("^~p",  "Control Option P",         UInt32(kVK_ANSI_P), UInt32(controlKey | optionKey),
+   "p", [.control, .option]),
+  ("^@p",  "Control Comando P",        UInt32(kVK_ANSI_P), UInt32(controlKey | cmdKey),
+   "p", [.control, .command]),
+  ("^~space", "Control Option Espaço", UInt32(kVK_Space),  UInt32(controlKey | optionKey),
+   " ", [.control, .option]),
+  ("f13",  "F13",                      UInt32(kVK_F13),    0,
+   String(UnicodeScalar(NSF13FunctionKey)!), []),
+  ("^~@p", "Control Option Comando P", UInt32(kVK_ANSI_P), UInt32(controlKey | optionKey | cmdKey),
+   "p", [.control, .option, .command]),
+  ("nenhum", "Sem atalho",             0,                  0,
+   "", []),
 ]
 
 /// O tratador do atalho é uma função C e não captura contexto, então precisa
@@ -300,7 +307,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         m.addItem(queueItem)
         m.addItem(.separator())
 
-        silItem = NSMenuItem(title: "Silêncio", action: #selector(toggleSilencio), keyEquivalent: "s")
+        silItem = NSMenuItem(title: "Silêncio", action: #selector(toggleSilencio), keyEquivalent: "")
         silItem.target = self; m.addItem(silItem)
         ppItem = NSMenuItem(title: "Pausar", action: #selector(togglePlay), keyEquivalent: ""); ppItem.target = self
         skipItem = NSMenuItem(title: "Pular esta", action: #selector(skip), keyEquivalent: ""); skipItem.target = self
@@ -353,7 +360,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         rei.target = self; m.addItem(rei)
         let q = NSMenuItem(title: "Sair", action: #selector(quit), keyEquivalent: "q"); q.target = self; m.addItem(q)
         item.menu = m
-        rebuildVoices(); rebuildProjects(); rebuildMode(); rebuildPause(); rebuildHotkey(); rebuildQueue(); refreshMenu()
+        rebuildVoices(); rebuildProjects(); rebuildMode(); rebuildPause(); rebuildHotkey(); mostrarAtalhoNoMenu(); rebuildQueue(); refreshMenu()
     }
 
     func rebuildVoices() {
@@ -1255,6 +1262,16 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         var id = EventHotKeyID(signature: OSType(0x56424152), id: 1)
         RegisterEventHotKey(a.tecla, a.mods, id, GetApplicationEventTarget(), 0, &hotKeyRef)
     }
+    /// Mostra no item Silêncio a combinação global que está valendo, em vez de
+    /// um atalho de menu qualquer. Sem isto o menu anunciava Comando S, que não
+    /// era o que funcionava de fato.
+    func mostrarAtalhoNoMenu() {
+        let escolhido = readf(HOTKEYF) ?? "^~p"
+        let a = ATALHOS.first { $0.id == escolhido }
+        silItem?.keyEquivalent = a?.eq ?? ""
+        silItem?.keyEquivalentModifierMask = a?.eqMods ?? []
+    }
+
     func rebuildHotkey() {
         hotkeyMenu.removeAllItems()
         let cur = readf(HOTKEYF) ?? "^~p"
@@ -1269,7 +1286,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     }
     @objc func pickHotkey(_ s: NSMenuItem) {
         if let v = s.representedObject as? String {
-            writef(HOTKEYF, v); registrarAtalho(); rebuildHotkey()
+            writef(HOTKEYF, v); registrarAtalho(); rebuildHotkey(); mostrarAtalhoNoMenu()
         }
     }
 
