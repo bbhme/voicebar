@@ -135,6 +135,7 @@ case "${1:-status}" in
           echo "volume : $(cat $V/volume 2>/dev/null)"
           echo "veloc. : $(cat $V/speed 2>/dev/null || echo 1.0)x"
           echo "modo   : $(cat $V/mode 2>/dev/null)"
+          [ "$(cat $R/silencio 2>/dev/null)" = "1" ] && echo "SILÊNCIO: ligado, a fila está retida"
           echo "anúncio: $([ "$(cat $V/announce 2>/dev/null||echo 1)" = 1 ] && echo ligado || echo desligado)"
           echo "avisos : $([ "$(cat $V/alerts 2>/dev/null||echo 1)" = 1 ] && echo ligados || echo desligados)"
           echo "fila   : $(find "$R/q" -name '*.job' 2>/dev/null | wc -l | tr -d ' ')"

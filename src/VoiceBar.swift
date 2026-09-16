@@ -24,6 +24,8 @@ let HOTKEYF = VDIR + "/hotkey"
 let ULTWAV = RDIR + "/ultima.wav"
 let ULTANN = RDIR + "/ultima-a.wav"
 let ULTPROJ = RDIR + "/ultima.proj"
+let SILF = RDIR + "/silencio"
+let ESTADOF = RDIR + "/estado"
 let PROMPTF = VDIR + "/summary_prompt.txt"
 let LABELSF = VDIR + "/labels.txt"
 
@@ -169,7 +171,8 @@ let ATALHOS: [(id: String, rotulo: String, tecla: UInt32, mods: UInt32,
 weak var controladorGlobal: Controller?
 
 struct Job { let job: String; let wav: String; let ann: String; let proj: String
-             let ts: Double; let prio: Bool; let rep: Bool }
+             let ts: Double; let prio: Bool; let rep: Bool
+             let pos: Double }   // segundos já ouvidos do conteúdo
 enum Fase { case parado, anuncio, conteudo }
 
 /// Pausas, em segundos. A do "trocou" é maior de propósito: dá tempo ao ouvido
@@ -191,6 +194,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     var nowAnn = ""
     var nowTs: Double = 0
     var nowRep = true        // avisos e a ajuda não viram "a última"
+    var posPendente: Double = 0   // de onde o conteúdo deve retomar
     var fase: Fase = .parado
     var geracao = 0          // invalida reproduções agendadas que ficaram obsoletas
     var ultimoProj = ""      // para saber se houve troca de projeto
@@ -265,6 +269,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         montarMenuDeEdicao()
         try? FileManager.default.createDirectory(atPath: QDIR, withIntermediateDirectories: true)
         writef(BARPID, String(ProcessInfo.processInfo.processIdentifier))
+        writef(SILF, "0")   // ao abrir, nunca em silêncio
         volume = Float(readf(VOLF) ?? "1.0") ?? 1.0
         speed = min(1.8, max(0.6, Float(readf(SPDF) ?? "1.0") ?? 1.0))
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -419,11 +424,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     }
     func pularPara(_ jobPath: String) {
         guard let alvo = scanQueue().first(where: { $0.job == jobPath }) else { return }
-        if player != nil, !nowWav.isEmpty {
-            let volta = QDIR + "/\(Int(nowTs))-devolvido.job"
-            writef(volta, "wav=\(nowWav)\nann=\(nowAnn)\nproj=\(nowProj)\nsess=\nts=\(Int(nowTs))\nprio=0\nrep=\(nowRep ? 1 : 0)\n")
-            player?.stop(); player = nil; nowWav = ""
-        }
+        devolverAtual()
         rm(alvo.job)
         play(alvo)
         queueSig = ""
@@ -784,12 +785,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
                     if n > 0 { self.atualizaContagem() }
                 }
                 let j = Job(job: "", wav: out, ann: ann, proj: origem,
-                            ts: Date().timeIntervalSince1970, prio: true, rep: true)
-                if self.player != nil, !self.nowWav.isEmpty {
-                    let volta = QDIR + "/\(Int(self.nowTs))-devolvido.job"
-                    writef(volta, "wav=\(self.nowWav)\nann=\(self.nowAnn)\nproj=\(self.nowProj)\nsess=\nts=\(Int(self.nowTs))\nprio=0\nrep=\(self.nowRep ? 1 : 0)\n")
-                    self.player?.stop(); self.player = nil; self.nowWav = ""
-                }
+                            ts: Date().timeIntervalSince1970, prio: true, rep: true, pos: 0)
+                self.devolverAtual()
                 self.play(j)
             }
         }
@@ -810,7 +807,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             pr.waitUntilExit()
             guard pr.terminationStatus == 0 else { return }
             DispatchQueue.main.async {
-                self.play(Job(job: "", wav: out, ann: "", proj: "ajuda", ts: Date().timeIntervalSince1970, prio: true, rep: false))
+                self.play(Job(job: "", wav: out, ann: "", proj: "ajuda", ts: Date().timeIntervalSince1970, prio: true, rep: false, pos: 0))
             }
         }
     }
@@ -929,7 +926,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             guard self.rodar(VDIR + "/synth.sh", [voz, out], entrada: fala + ".") != nil else { return }
             DispatchQueue.main.async {
                 self.play(Job(job: "", wav: out, ann: "", proj: proj,
-                              ts: Date().timeIntervalSince1970, prio: true, rep: false))
+                              ts: Date().timeIntervalSince1970, prio: true, rep: false, pos: 0))
             }
         }
     }
@@ -1252,6 +1249,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     /// no meio da ligação, que é exatamente o que se quer evitar.
     @objc func toggleSilencio() {
         silencio.toggle()
+        writef(SILF, silencio ? "1" : "0")   // para o terminal poder mostrar
         if silencio { player?.pause() } else { player?.play() }
         refreshMenu()
     }
@@ -1323,7 +1321,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             }
             guard let w = d["wav"], let ts = Double(d["ts"] ?? "") else { continue }
             out.append(Job(job: path, wav: w, ann: d["ann"] ?? "", proj: d["proj"] ?? "?",
-                           ts: ts, prio: (d["prio"] ?? "0") == "1", rep: (d["rep"] ?? "1") == "1"))
+                           ts: ts, prio: (d["prio"] ?? "0") == "1", rep: (d["rep"] ?? "1") == "1",
+                           pos: Double(d["pos"] ?? "0") ?? 0))
         }
         return out.sorted { $0.ts < $1.ts }
     }
@@ -1353,6 +1352,9 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             }
         }
 
+        // espelha o estado interno em disco: sem isto, uma fila parada é
+        // indistinguível de silêncio, de fase travada ou de projeto mudo
+        writef(ESTADOF, "fase=\(fase) player=\(player == nil ? "nil" : "ok") silencio=\(silencio) geracao=\(geracao)")
         var jobs = scanQueue()
         let now = Date().timeIntervalSince1970
         let muted = Set(lines(MUTEDF))
@@ -1390,6 +1392,22 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         refreshMenu()
     }
 
+    /// Devolve para a fila o que está tocando, anotando onde parou. Sem isso,
+    /// uma fala interrompida recomeçava do início ao ser retomada.
+    /// A posição só vale para o conteúdo: se a interrupção pegou o anúncio,
+    /// ele volta do zero, que dura menos de dois segundos de qualquer forma.
+    @discardableResult
+    func devolverAtual() -> Bool {
+        guard player != nil, !nowWav.isEmpty else { return false }
+        let pos = (fase == .conteudo) ? (player?.currentTime ?? 0) : 0
+        let volta = QDIR + "/\(Int(nowTs))-devolvido.job"
+        writef(volta, "wav=\(nowWav)\nann=\(nowAnn)\nproj=\(nowProj)\nsess=\nts=\(Int(nowTs))" +
+                      "\nprio=0\nrep=\(nowRep ? 1 : 0)\npos=\(String(format: "%.2f", pos))\n")
+        player?.stop(); player = nil
+        nowWav = ""; nowAnn = ""
+        return true
+    }
+
     func pausas() -> (mesmo: Double, trocou: Double, apos: Double) {
         PAUSAS[readf(PAUSEF) ?? "media"] ?? PAUSAS["media"]!
     }
@@ -1405,6 +1423,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         let antes = trocou ? p.trocou : p.mesmo
 
         nowProj = j.proj; nowWav = j.wav; nowAnn = j.ann; nowTs = j.ts; nowRep = j.rep
+        posPendente = j.pos
         ultimoProj = j.proj
 
         let temAnuncio = !j.ann.isEmpty && FileManager.default.fileExists(atPath: j.ann)
@@ -1417,17 +1436,26 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
                 // o nome sempre em 1x, e um pouco acima no volume, para destacar
                 self.tocarArquivo(j.ann, rate: 1.0, vol: min(1.0, self.volume * 1.15))
             } else {
-                self.tocarArquivo(j.wav, rate: self.speed, vol: self.volume)
+                self.tocarArquivo(j.wav, rate: self.speed, vol: self.volume, de: j.pos)
             }
         }
     }
 
-    func tocarArquivo(_ path: String, rate: Float, vol: Float) {
+    func tocarArquivo(_ path: String, rate: Float, vol: Float, de: Double = 0) {
         guard let p = try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: path)) else {
             rm(path); encerrarFala(); return
         }
         p.delegate = self; p.enableRate = true; p.volume = vol
-        p.prepareToPlay(); p.rate = rate; p.play()
+        p.prepareToPlay()
+        if de > 0, de < p.duration - 0.2 {
+            p.currentTime = de
+            let d = DateFormatter(); d.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            let l = "\(d.string(from: Date())) retomou em \(String(format: "%.1f", de))s de \(String(format: "%.1f", p.duration))s\n"
+            if let f = FileHandle(forWritingAtPath: HOME + "/.claude/hooks/speak-response.log") {
+                f.seekToEndOfFile(); f.write(l.data(using: .utf8) ?? Data()); try? f.close()
+            }
+        }
+        p.rate = rate; p.play()
         player = p
         refreshMenu()
     }
@@ -1477,13 +1505,9 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         if fm.fileExists(atPath: ULTANN), (try? fm.copyItem(atPath: ULTANN, toPath: a)) != nil { ann = a }
         let proj = readf(ULTPROJ) ?? "repetição"
         // devolve para a fila o que estiver tocando, como o texto selecionado faz
-        if player != nil, !nowWav.isEmpty {
-            let volta = QDIR + "/\(Int(nowTs))-devolvido.job"
-            writef(volta, "wav=\(nowWav)\nann=\(nowAnn)\nproj=\(nowProj)\nsess=\nts=\(Int(nowTs))\nprio=0\nrep=\(nowRep ? 1 : 0)\n")
-            player?.stop(); player = nil; nowWav = ""; nowAnn = ""
-        }
+        devolverAtual()
         silencio = false
-        play(Job(job: "", wav: w, ann: ann, proj: proj, ts: Date().timeIntervalSince1970, prio: true, rep: false))
+        play(Job(job: "", wav: w, ann: ann, proj: proj, ts: Date().timeIntervalSince1970, prio: true, rep: false, pos: 0))
     }
 
     func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully f: Bool) {
@@ -1496,9 +1520,10 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             // o anúncio fica em disco até o fim do trabalho: ele faz parte
             // do que se repete, e some junto com o conteúdo
             refreshMenu()
+            let ponto = posPendente
             DispatchQueue.main.asyncAfter(deadline: .now() + pausas().apos) {
                 guard gen == self.geracao else { return }
-                self.tocarArquivo(conteudo, rate: self.speed, vol: self.volume)
+                self.tocarArquivo(conteudo, rate: self.speed, vol: self.volume, de: ponto)
             }
             return
         }
