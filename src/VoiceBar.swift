@@ -109,7 +109,10 @@ let AJUDA: [(String, String)] = [
   "Marcando Resumir antes de ler, dois campos ao lado passam a valer. O menu de tamanho deixa você usar uma redução diferente da global só nesta leitura, e o campo de instrução aceita um pedido diferente do global, também só desta vez. Deixando o menu em Tamanho do ajuste global e o campo em branco, ele usa exatamente o que está configurado em Resumo por IA. Nada do que você escolher aqui altera os ajustes globais. Marcar esta opção também resume mesmo que o resumo esteja desligado no menu, porque foi um pedido explícito seu."),
 
  ("Desligar, sair e voltar",
-  "Ler as respostas desmarcado silencia as respostas do Claude Code, mas você continua podendo mandar ler um texto. Sair fecha o app: a leitura das respostas continua funcionando, só que sem controles, sem fila e sem anúncio. O app volta sozinho no próximo login."),
+  "Ler as respostas desmarcado silencia as respostas do Claude Code, mas você continua podendo mandar ler um texto. Sair fecha o app: a leitura das respostas continua funcionando, só que sem controles, sem fila e sem anúncio."),
+
+ ("Se o app cair ou travar",
+  "Se ele cair sozinho, volta em cerca de três segundos: o sistema o vigia e o reinicia, mas só quando a saída foi anormal. Quando você escolhe Sair, ele fica fechado, como deve. Se travar sem morrer, o vigia não percebe; nesse caso use voice restart no terminal, que derruba o processo travado e sobe um novo. Para abrir depois de ter saído, use voice bar. E ele sempre volta sozinho quando você faz login."),
 
  ("Tudo isso também funciona no terminal",
   "Pelo comando voice.  Reprodução: pause, resume, toggle, skip, stop, clear.  Ajustes: vol, speed, use, list.  Fila: fila, pick, mode, mute, unmute, projetos.  Extras: pausa, announce, resumo, say, status.  Sem argumento, cada um mostra o valor atual."),
@@ -1205,6 +1208,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             case "stop": stopPlay()
             case "skip": skip()
             case "clear": clearQueue()
+            case "quit":  quit()
             case "pick":
                 if p.count > 1, let n = Int(p[1]), n >= 1, n <= queued.count {
                     pularPara(queued[n-1].job)

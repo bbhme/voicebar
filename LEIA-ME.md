@@ -99,7 +99,7 @@ Troque pelo submenu **Voz**, no ícone da barra.
 ## Primeiros passos
 
 Depois de instalar, clique no ícone da barra de menus e escolha **Como usar…**.
-São 21 seções explicando tudo, e há um botão que lê a explicação em voz alta.
+São 22 seções explicando tudo, e há um botão que lê a explicação em voz alta.
 
 No terminal:
 
@@ -196,7 +196,20 @@ gerado com ela. As outras seis não exigem nada.
 
 Erros ficam registrados em `~/.claude/hooks/speak-response.log`.
 
-Se o ícone sumir da barra de menus, rode `voice bar` para abrir de novo.
+### Se o ícone sumir da barra
+
+| Situação | O que acontece |
+|---|---|
+| O app caiu sozinho | volta em cerca de três segundos, sem você fazer nada |
+| Você escolheu **Sair** | fica fechado; use `voice bar` para abrir |
+| O app travou sem morrer | use `voice restart` |
+| Você reiniciou o Mac | volta sozinho no login |
+
+O sistema vigia o app e o reinicia **apenas quando a saída foi anormal**. Se você
+escolheu Sair, ele respeita a sua decisão e não insiste.
+
+Travamento é o único caso que o vigia não cobre, porque o processo não morreu,
+só parou de responder. O `voice restart` derruba o travado e sobe um novo.
 
 Se a fala parar, rode `voice status`. Ele mostra se o gatilho está ligado, qual
 voz está ativa e quantas falas estão na fila.

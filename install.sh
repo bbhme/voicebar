@@ -239,6 +239,11 @@ cat > "$LA" <<PLIST
   <key>ProgramArguments</key><array><string>$V/voicebar</string></array>
   <key>RunAtLoad</key><true/>
   <key>ProcessType</key><string>Interactive</string>
+  <!-- Ressuscita se cair, mas respeita quando você escolhe Sair no menu:
+       SuccessfulExit false significa "só reinicie se a saída foi anormal". -->
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>5</integer>
 </dict>
 </plist>
 PLIST

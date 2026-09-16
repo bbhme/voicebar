@@ -110,7 +110,21 @@ case "${1:-status}" in
   say)    shift; t="$*"; [ -z "$t" ] && { echo "uso: voice say \"texto\""; exit 1; }
           "$V/synth.sh" "$(cat $V/current)" "$R/say.wav" <<< "$t" || exit 1
           afplay -v "$(cat $V/volume 2>/dev/null || echo 1)" "$R/say.wav";;
-  bar)    b=$(bar); [ -n "$b" ] && echo "app da barra rodando (pid $b)" || { nohup "$V/voicebar" >/dev/null 2>&1 & disown; sleep 1; echo "app da barra iniciado"; };;
+  bar)    b=$(bar); [ -n "$b" ] && echo "app da barra rodando (pid $b)" || {
+            # reinicia pelo launchd quando ele conhece o servico, senao direto
+            if launchctl list 2>/dev/null | grep -q com.claude.voicebar; then
+              launchctl kickstart -k "gui/$(id -u)/com.claude.voicebar" 2>/dev/null
+            else
+              nohup "$V/voicebar" >/dev/null 2>&1 & disown
+            fi
+            sleep 2; b=$(bar)
+            [ -n "$b" ] && echo "app da barra iniciado (pid $b)" || echo "nao consegui iniciar"; };;
+  restart|reiniciar)
+          launchctl kickstart -k "gui/$(id -u)/com.claude.voicebar" 2>/dev/null \
+            || { pkill -x voicebar 2>/dev/null; nohup "$V/voicebar" >/dev/null 2>&1 & disown; }
+          sleep 2; b=$(bar)
+          [ -n "$b" ] && echo "reiniciado (pid $b)" || echo "nao consegui reiniciar";;
+  quit|sair) [ -n "$(bar)" ] && { send quit; sleep 1; echo "app encerrado"; } || echo "ja estava fechado";;
   status) [ -n "$(bar)" ] && echo "estado : $(cat $R/../current >/dev/null; echo controlado pelo app da barra)" || echo "estado : $(st)"
           echo "voz    : $(cat $V/current 2>/dev/null)"
           echo "volume : $(cat $V/volume 2>/dev/null)"
@@ -159,6 +173,8 @@ case "${1:-status}" in
      echo "GERAL"
      echo "  on | off                     liga e desliga a leitura das respostas"
      echo "  say <texto>                  fala um texto agora"
-     echo "  bar                          inicia o app da barra se estiver fechado"
+     echo "  bar                          inicia o app se estiver fechado"
+     echo "  restart                      reinicia o app da barra"
+     echo "  quit                         encerra o app (nao volta sozinho)"
      echo "  status                       resumo de tudo";;
 esac
