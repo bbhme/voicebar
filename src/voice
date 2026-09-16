@@ -124,6 +124,8 @@ case "${1:-status}" in
             || { pkill -x voicebar 2>/dev/null; nohup "$V/voicebar" >/dev/null 2>&1 & disown; }
           sleep 2; b=$(bar)
           [ -n "$b" ] && echo "reiniciado (pid $b)" || echo "nao consegui reiniciar";;
+  silencio|mudo) [ -n "$(bar)" ] && { send silencio; echo "silêncio alternado"; exit 0; }
+          echo "app da barra nao esta rodando";;
   quit|sair) [ -n "$(bar)" ] && { send quit; sleep 1; echo "app encerrado"; } || echo "ja estava fechado";;
   status) [ -n "$(bar)" ] && echo "estado : $(cat $R/../current >/dev/null; echo controlado pelo app da barra)" || echo "estado : $(st)"
           echo "voz    : $(cat $V/current 2>/dev/null)"
@@ -140,6 +142,7 @@ case "${1:-status}" in
      echo
      echo "REPRODUÇÃO"
      echo "  pause | resume | toggle      pausa, retoma, alterna"
+     echo "  silencio                     modo ligação: pausa e segura a fila"
      echo "  skip                         pula a fala atual e chama a próxima"
      echo "  stop                         descarta a fala atual"
      echo "  clear                        esvazia a fila sem cortar a atual"

@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Carbon.HIToolbox
 
 let HOME = NSHomeDirectory()
 let VDIR = HOME + "/.claude/voice"
@@ -19,6 +20,7 @@ let CONFF = VDIR + "/summary.conf"
 let KEYF = VDIR + "/openai.env"
 let PAUSEF = VDIR + "/pause"
 let ALERTSF = VDIR + "/alerts"
+let HOTKEYF = VDIR + "/hotkey"
 let PROMPTF = VDIR + "/summary_prompt.txt"
 let LABELSF = VDIR + "/labels.txt"
 
@@ -59,6 +61,9 @@ let AJUDA: [(String, String)] = [
 
  ("As duas primeiras linhas do menu",
   "A primeira diz o que acontece agora: Anunciando com o nome do projeto, Pausa durante os silêncios, Lendo com o tempo que ainda falta, ou Parado. A segunda só aparece quando há espera, e mostra quantas falas estão na fila e de quais projetos."),
+
+ ("Silêncio, para quando o telefone toca",
+  "Um atalho de teclado que vale de qualquer aplicativo alterna o modo Silêncio. Ele não é a mesma coisa que pausar: além de congelar a fala atual, segura a fila inteira, inclusive avisos e leituras que normalmente teriam prioridade. Sem isso, a resposta seguinte começaria a falar no meio da sua ligação, que é justamente o que se quer evitar. O ícone vira uma lua e a primeira linha mostra quantas falas estão esperando. Apertar de novo retoma tudo de onde parou. O atalho sai de fábrica em Control Option P e pode ser trocado no submenu Atalho para pausar."),
 
  ("Ouvir, pausar, pular e parar",
   "Pausar congela no ponto exato e vira Retomar.  Pular esta abandona a fala atual e chama a próxima da fila.  Parar descarta a fala atual inteira.  Limpar a fila joga fora tudo que espera, sem interromper a que está tocando."),
@@ -135,6 +140,21 @@ E para ler um texto qualquer, selecione, clique com o botão direito e escolha S
 Tudo isso também funciona pelo terminal, com o comando voice.
 """
 
+/// Atalhos globais oferecidos. A tecla e os modificadores usam a API Carbon,
+/// que registra um atalho de sistema sem exigir permissão de acessibilidade.
+let ATALHOS: [(id: String, rotulo: String, tecla: UInt32, mods: UInt32)] = [
+  ("^~p",  "Control Option P",          UInt32(kVK_ANSI_P),     UInt32(controlKey | optionKey)),
+  ("^@p",  "Control Comando P",         UInt32(kVK_ANSI_P),     UInt32(controlKey | cmdKey)),
+  ("^~space", "Control Option Espaço",  UInt32(kVK_Space),      UInt32(controlKey | optionKey)),
+  ("f13",  "F13",                       UInt32(kVK_F13),        0),
+  ("^~@p", "Control Option Comando P",  UInt32(kVK_ANSI_P),     UInt32(controlKey | optionKey | cmdKey)),
+  ("nenhum", "Sem atalho",              0,                      0),
+]
+
+/// O tratador do atalho é uma função C e não captura contexto, então precisa
+/// desta referência global para alcançar o controlador.
+weak var controladorGlobal: Controller?
+
 struct Job { let job: String; let wav: String; let ann: String; let proj: String; let ts: Double; let prio: Bool }
 enum Fase { case parado, anuncio, conteudo }
 
@@ -162,12 +182,15 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     var queueSig = ""
     var helpWin: NSWindow?
     var queued: [Job] = []
-    var stateItem, queueItem, ppItem, skipItem, stopItem, clearItem, offItem, annItem, alertItem: NSMenuItem!
-    var voiceMenu, projMenu, modeMenu, queueMenu, pauseMenu: NSMenu!
+    var stateItem, queueItem, ppItem, skipItem, stopItem, clearItem, offItem, annItem, alertItem, silItem: NSMenuItem!
+    var voiceMenu, projMenu, modeMenu, queueMenu, pauseMenu, hotkeyMenu: NSMenu!
     var volLabel, spdLabel: NSTextField!
     var volSlider, spdSlider: NSSlider!
     var projSig = ""
-    var iconeAtual = ""      // evita recriar e redesenhar o ícone 3x por segundo
+    var iconeAtual = ""
+    var hotKeyRef: EventHotKeyRef?
+    var tratadorInstalado = false
+    var silencio = false     // modo ligação: segura a fila, não só a fala atual      // evita recriar e redesenhar o ícone 3x por segundo
     // ajustes do resumo por IA
     var cfgWin: NSWindow?
     var keyField: NSSecureTextField!
@@ -223,6 +246,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        controladorGlobal = self
         montarMenuDeEdicao()
         try? FileManager.default.createDirectory(atPath: QDIR, withIntermediateDirectories: true)
         writef(BARPID, String(ProcessInfo.processInfo.processIdentifier))
@@ -231,6 +255,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         icone("speaker.wave.2")
         buildMenu()
+        registrarAtalho()
         Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in self?.tick() }
     }
     /// Troca o ícone da barra só quando o símbolo muda. Sem isto o app
@@ -275,6 +300,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         m.addItem(queueItem)
         m.addItem(.separator())
 
+        silItem = NSMenuItem(title: "Silêncio", action: #selector(toggleSilencio), keyEquivalent: "s")
+        silItem.target = self; m.addItem(silItem)
         ppItem = NSMenuItem(title: "Pausar", action: #selector(togglePlay), keyEquivalent: ""); ppItem.target = self
         skipItem = NSMenuItem(title: "Pular esta", action: #selector(skip), keyEquivalent: ""); skipItem.target = self
         stopItem = NSMenuItem(title: "Parar", action: #selector(stopPlay), keyEquivalent: ""); stopItem.target = self
@@ -300,6 +327,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         m.addItem(mi); m.setSubmenu(modeMenu, for: mi)
         pauseMenu = NSMenu(); let pzi = NSMenuItem(title: "Pausa ao trocar de projeto", action: nil, keyEquivalent: "")
         m.addItem(pzi); m.setSubmenu(pauseMenu, for: pzi)
+        hotkeyMenu = NSMenu(); let hki = NSMenuItem(title: "Atalho para pausar", action: nil, keyEquivalent: "")
+        m.addItem(hki); m.setSubmenu(hotkeyMenu, for: hki)
         m.addItem(.separator())
 
         annItem = NSMenuItem(title: "Anunciar a origem antes", action: #selector(toggleAnn), keyEquivalent: "")
@@ -324,7 +353,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         rei.target = self; m.addItem(rei)
         let q = NSMenuItem(title: "Sair", action: #selector(quit), keyEquivalent: "q"); q.target = self; m.addItem(q)
         item.menu = m
-        rebuildVoices(); rebuildProjects(); rebuildMode(); rebuildPause(); rebuildQueue(); refreshMenu()
+        rebuildVoices(); rebuildProjects(); rebuildMode(); rebuildPause(); rebuildHotkey(); rebuildQueue(); refreshMenu()
     }
 
     func rebuildVoices() {
@@ -1201,6 +1230,49 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         }
     }
 
+    /// Silêncio é o modo para quando o telefone toca: além de pausar a fala
+    /// atual, ele segura a fila. Sem isso, a próxima resposta começaria a falar
+    /// no meio da ligação, que é exatamente o que se quer evitar.
+    @objc func toggleSilencio() {
+        silencio.toggle()
+        if silencio { player?.pause() } else { player?.play() }
+        refreshMenu()
+    }
+
+    func registrarAtalho() {
+        if let r = hotKeyRef { UnregisterEventHotKey(r); hotKeyRef = nil }
+        let escolhido = readf(HOTKEYF) ?? "^~p"
+        guard let a = ATALHOS.first(where: { $0.id == escolhido }), a.tecla != 0 else { return }
+        if !tratadorInstalado {
+            var tipo = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
+                                     eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ -> OSStatus in
+                DispatchQueue.main.async { controladorGlobal?.toggleSilencio() }
+                return noErr
+            }, 1, &tipo, nil, nil)
+            tratadorInstalado = true
+        }
+        var id = EventHotKeyID(signature: OSType(0x56424152), id: 1)
+        RegisterEventHotKey(a.tecla, a.mods, id, GetApplicationEventTarget(), 0, &hotKeyRef)
+    }
+    func rebuildHotkey() {
+        hotkeyMenu.removeAllItems()
+        let cur = readf(HOTKEYF) ?? "^~p"
+        for a in ATALHOS {
+            let mi = NSMenuItem(title: a.rotulo, action: #selector(pickHotkey(_:)), keyEquivalent: "")
+            mi.target = self; mi.representedObject = a.id; mi.state = (a.id == cur) ? .on : .off
+            hotkeyMenu.addItem(mi)
+        }
+        hotkeyMenu.addItem(.separator())
+        let n = NSMenuItem(title: "Pausa e retoma de qualquer aplicativo", action: nil, keyEquivalent: "")
+        n.isEnabled = false; hotkeyMenu.addItem(n)
+    }
+    @objc func pickHotkey(_ s: NSMenuItem) {
+        if let v = s.representedObject as? String {
+            writef(HOTKEYF, v); registrarAtalho(); rebuildHotkey()
+        }
+    }
+
     @objc func quit() { rm(BARPID); NSApp.terminate(nil) }
 
     func setVolume(_ v: Float) { volume = max(0, min(1, v)); player?.volume = volume
@@ -1241,6 +1313,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             case "clear": clearQueue()
             case "quit":  quit()
             case "restart": reiniciar()
+            case "silencio": toggleSilencio()
             case "pick":
                 if p.count > 1, let n = Int(p[1]), n >= 1, n <= queued.count {
                     pularPara(queued[n-1].job)
@@ -1273,14 +1346,14 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         queued = jobs
 
         // texto selecionado é pedido explícito: fura a fila
-        if let urgente = jobs.first(where: { $0.prio }) {
+        if !silencio, let urgente = jobs.first(where: { $0.prio }) {
             if player != nil { pularPara(urgente.job) } else { rm(urgente.job); play(urgente) }
             queued = scanQueue().filter { now - $0.ts <= MAX_AGE && !muted.contains($0.proj) }
             refreshMenu(); return
         }
         // fase != .parado significa que estamos no meio de um anúncio ou de uma pausa;
         // não puxe o próximo da fila enquanto isso.
-        if player == nil, fase == .parado, let next = jobs.first {
+        if !silencio, player == nil, fase == .parado, let next = jobs.first {
             rm(next.job)
             queued = Array(jobs.dropFirst())
             play(next)
@@ -1363,6 +1436,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     func refreshMenu() {
         let isOff = FileManager.default.fileExists(atPath: OFFF)
         offItem?.state = isOff ? .off : .on
+        silItem?.state = silencio ? .on : .off
+        porTitulo(silItem, silencio ? "Silêncio (ligado)" : "Silêncio")
         annItem?.state = (readf(ANNF) ?? "1") == "1" ? .on : .off
         alertItem?.state = (readf(ALERTSF) ?? "1") == "1" ? .on : .off
         volLabel?.stringValue = "\(Int(volume*100))%"; volSlider?.floatValue = volume
@@ -1379,6 +1454,16 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         skipItem.isEnabled = player != nil || fase != .parado
 
         let who = nowProj.isEmpty ? "" : " · \(nowProj)"
+        if silencio {
+            icone("moon.zzz.fill")
+            let espera = queued.count + (player != nil ? 1 : 0)
+            stateItem.title = espera > 0 ? "Silêncio · \(espera) esperando" : "Silêncio"
+            ppItem.title = "Pausar"; ppItem.isEnabled = false
+            stopItem.isEnabled = player != nil
+            let sig = (readf(PROJF) ?? "") + "|" + (readf(MUTEDF) ?? "")
+            if sig != projSig { projSig = sig; rebuildProjects() }
+            return
+        }
         if let p = player {
             // o anúncio toca sempre em 1x, então o tempo restante dele não escala
             let taxa = fase == .anuncio ? 1.0 : Double(speed)

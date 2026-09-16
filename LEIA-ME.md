@@ -99,7 +99,7 @@ Troque pelo submenu **Voz**, no ícone da barra.
 ## Primeiros passos
 
 Depois de instalar, clique no ícone da barra de menus e escolha **Como usar…**.
-São 22 seções explicando tudo, e há um botão que lê a explicação em voz alta.
+São 23 seções explicando tudo, e há um botão que lê a explicação em voz alta.
 
 No terminal:
 
@@ -149,6 +149,23 @@ permissões não virar metralhadora.
 
 Some no menu pelo item **Avisar quando precisar de você**, separado da leitura
 das respostas. Uma resposta que termina em pergunta também é anunciada como tal.
+
+---
+
+## Silêncio, para quando o telefone toca
+
+Pressione **Control Option P** de qualquer aplicativo. A fala congela e a fila
+inteira fica retida, inclusive avisos e leituras prioritárias. Pressione de novo
+e tudo retoma de onde parou.
+
+Isto não é o mesmo que pausar. Pausar congela só a fala atual, e a próxima
+resposta começaria a falar no meio da sua ligação. O silêncio segura tudo.
+
+O ícone da barra vira uma lua enquanto está ativo, e a primeira linha do menu
+mostra quantas falas estão esperando.
+
+A combinação pode ser trocada no submenu **Atalho para pausar**, que oferece
+cinco opções. No terminal, `voice silencio` faz o mesmo.
 
 ---
 

@@ -70,6 +70,7 @@ seed mode     fila
 seed pause    media
 seed announce 1
 seed alerts   1
+seed hotkey   '^~p'
 [ -f "$V/muted.txt" ]    || : > "$V/muted.txt"
 [ -f "$V/projects.txt" ] || : > "$V/projects.txt"
 [ -f "$V/labels.txt" ]   || : > "$V/labels.txt"
