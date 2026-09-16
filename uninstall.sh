@@ -24,11 +24,13 @@ if [ -f "$S" ] && command -v jq >/dev/null 2>&1; then
   TMP="$(mktemp)"
   # tira só o nosso hook e limpa entradas que ficarem vazias
   jq '
-    if .hooks.Stop then
-      .hooks.Stop = [ .hooks.Stop[]
-        | .hooks = [ .hooks[]? | select(.command != "~/.claude/hooks/speak-response.sh") ]
-        | select((.hooks | length) > 0) ]
-      | if (.hooks.Stop | length) == 0 then del(.hooks.Stop) else . end
+    def nosso: . == "~/.claude/hooks/speak-response.sh"
+            or (. | startswith("~/.claude/hooks/voice-alert.sh"));
+    if .hooks then
+      .hooks = ( .hooks
+        | map_values([ .[] | .hooks = [ .hooks[]? | select(.command | nosso | not) ]
+                           | select((.hooks | length) > 0) ])
+        | with_entries(select((.value | length) > 0)) )
       | if (.hooks | length) == 0 then del(.hooks) else . end
     else . end
   ' "$S" > "$TMP" && mv "$TMP" "$S"
@@ -44,7 +46,7 @@ defaults delete pbs NSServicesStatus 2>/dev/null
 ok "serviço e atalho removidos"
 
 step "Removendo scripts e comando"
-rm -f "$H/speak-response.sh" "$H/speak-response.py" "$H/voice.off"
+rm -f "$H/speak-response.sh" "$H/speak-response.py" "$H/voice-alert.sh" "$H/voice.off"
 rm -f "$HOME/.local/bin/voice"
 ok "scripts do hook e comando voice removidos"
 

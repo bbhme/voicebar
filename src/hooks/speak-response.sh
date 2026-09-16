@@ -47,6 +47,15 @@ if [ "$(cat "$V/announce" 2>/dev/null || echo 1)" = "1" ]; then
   # legenda definida pelo usuário para este projeto; sem ela, o nome da pasta limpo
   NOME=$(grep "^$PROJ|" "$V/labels.txt" 2>/dev/null | head -1 | cut -d'|' -f2-)
   [ -z "$NOME" ] && NOME=$(printf '%s' "$PROJ" | tr '_.-' '   ' | sed 's/  */ /g; s/^ //; s/ $//')
+
+  # Resposta que termina em pergunta é anunciada como tal: você percebe que
+  # a sessão está esperando por você sem precisar ouvir até o fim.
+  if printf '%s' "$TEXT" | sed 's/[[:space:]]*$//' | grep -q '?$'; then
+    IDIOMA=$(cat "$V/lang.active" 2>/dev/null); IDIOMA=${IDIOMA:-pt-BR}
+    LCONF="$V/lang/$IDIOMA.conf"; [ -f "$LCONF" ] || LCONF="$V/lang/pt-BR.conf"
+    MOLDE=$(grep '^SAY_QUESTION=' "$LCONF" 2>/dev/null | head -1 | cut -d= -f2-)
+    [ -n "$MOLDE" ] && NOME=$(printf '%s' "$MOLDE" | sed "s|{PROJ}|$NOME|g")
+  fi
   ANN="$R/a-$$-$STAMP.wav"
   printf '%s.' "$NOME" | "$V/synth.sh" "$VOZ" "$ANN" 2>>"$LOG" || ANN=""
   [ -s "$ANN" ] || ANN=""

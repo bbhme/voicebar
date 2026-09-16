@@ -57,8 +57,8 @@ chmod +x "$V/voice" "$V/synth.sh" "$V/speak.py" "$V/speak_kokoro.py" \
 mkdir -p "$V/lang"
 cp "$SRC"/lang/*.conf "$SRC"/lang/*.prompt "$V/lang/"
 [ -f "$V/lang.active" ] || echo pt-BR > "$V/lang.active"
-cp "$SRC/hooks/speak-response.sh" "$SRC/hooks/speak-response.py" "$H/"
-chmod +x "$H/speak-response.sh" "$H/speak-response.py"
+cp "$SRC/hooks/speak-response.sh" "$SRC/hooks/speak-response.py" "$SRC/hooks/voice-alert.sh" "$H/"
+chmod +x "$H/speak-response.sh" "$H/speak-response.py" "$H/voice-alert.sh"
 ok "scripts e pacotes de idioma instalados"
 
 # ajustes padrão, sem sobrescrever escolhas que já existam
@@ -69,6 +69,7 @@ seed speed    1.0
 seed mode     fila
 seed pause    media
 seed announce 1
+seed alerts   1
 [ -f "$V/muted.txt" ]    || : > "$V/muted.txt"
 [ -f "$V/projects.txt" ] || : > "$V/projects.txt"
 [ -f "$V/labels.txt" ]   || : > "$V/labels.txt"
@@ -164,7 +165,21 @@ jq '
 ' "$S" > "$TMP" && mv "$TMP" "$S" || die "Não consegui editar o settings.json (backup preservado)."
 jq -e '[.hooks.Stop[]?.hooks[]?.command] | any(. == "~/.claude/hooks/speak-response.sh")' "$S" >/dev/null \
   || die "O hook não ficou registrado."
-ok "hook Stop registrado (backup do settings.json guardado ao lado)"
+
+# avisos: pergunta, permissão, espera e erro
+TMP2="$(mktemp)"
+jq '
+  def add($ev; $arg):
+    .hooks[$ev] //= [] |
+    if ([.hooks[$ev][]?.hooks[]?.command] | any(startswith("~/.claude/hooks/voice-alert.sh")))
+    then .
+    else .hooks[$ev] += [{"hooks":[{"type":"command","command":("~/.claude/hooks/voice-alert.sh " + $arg),"timeout":20,"async":true}]}]
+    end;
+  .hooks //= {}
+  | add("Elicitation";"pergunta") | add("PermissionRequest";"permissao")
+  | add("Notification";"atencao") | add("StopFailure";"erro")
+' "$S" > "$TMP2" && mv "$TMP2" "$S"
+ok "hooks registrados: leitura e quatro avisos (backup do settings.json ao lado)"
 
 # ───────────────────────────────────────── 8. serviço de texto selecionado
 step "8/9  Instalando o serviço Ler em voz alta"

@@ -18,6 +18,7 @@ let BARPID = RDIR + "/bar.pid"
 let CONFF = VDIR + "/summary.conf"
 let KEYF = VDIR + "/openai.env"
 let PAUSEF = VDIR + "/pause"
+let ALERTSF = VDIR + "/alerts"
 let PROMPTF = VDIR + "/summary_prompt.txt"
 let LABELSF = VDIR + "/labels.txt"
 
@@ -95,6 +96,9 @@ let AJUDA: [(String, String)] = [
  ("Instruções para a IA",
   "O campo de texto livre na mesma janela manda mais que as regras internas do resumidor, então serve para o que você quiser: mudar o tom, dizer como tratar símbolos e siglas, proteger números e nomes que nunca podem sumir, ou pedir que a resposta comece pelo resultado. O botão Exemplos abre oito instruções prontas, que você pode inserir e depois editar. Deixe em branco para usar só o padrão."),
 
+ ("Avisos quando o Claude Code precisa de você",
+  "Além de ler as respostas, o sistema avisa em quatro situações: quando o Claude faz uma pergunta, quando pede permissão para executar algo, quando fica parado esperando você, e quando o turno termina em erro. O aviso é curto, diz o nome do projeto e fura a fila, porque existe para interromper. Avisos iguais do mesmo projeto respeitam um intervalo de quinze segundos, para uma sequência de permissões não virar metralhadora. O item Avisar quando precisar de você liga e desliga isso, separado da leitura das respostas. Uma resposta que termina em pergunta também é anunciada como pergunta."),
+
  ("Ler qualquer texto, não só as respostas",
   "Quatro caminhos levam ao mesmo lugar. Ler um texto abre uma janela onde você cola ou escreve, com contagem de palavras e estimativa de duração. Ou selecione o texto em qualquer aplicativo e use o botão direito, Serviços, Ler em voz alta. Ou pressione Control, Option, Comando e L com o texto selecionado. Ou copie com Comando C e clique em Ler o que está copiado. Em todos, a leitura fura a fila e o que estava tocando volta para a fila em vez de se perder."),
 
@@ -155,11 +159,12 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     var queueSig = ""
     var helpWin: NSWindow?
     var queued: [Job] = []
-    var stateItem, queueItem, ppItem, skipItem, stopItem, clearItem, offItem, annItem: NSMenuItem!
+    var stateItem, queueItem, ppItem, skipItem, stopItem, clearItem, offItem, annItem, alertItem: NSMenuItem!
     var voiceMenu, projMenu, modeMenu, queueMenu, pauseMenu: NSMenu!
     var volLabel, spdLabel: NSTextField!
     var volSlider, spdSlider: NSSlider!
     var projSig = ""
+    var iconeAtual = ""      // evita recriar e redesenhar o ícone 3x por segundo
     // ajustes do resumo por IA
     var cfgWin: NSWindow?
     var keyField: NSSecureTextField!
@@ -221,10 +226,18 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         volume = Float(readf(VOLF) ?? "1.0") ?? 1.0
         speed = min(1.8, max(0.6, Float(readf(SPDF) ?? "1.0") ?? 1.0))
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = sym("speaker.wave.2")
+        icone("speaker.wave.2")
         buildMenu()
         Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in self?.tick() }
     }
+    /// Troca o ícone da barra só quando o símbolo muda. Sem isto o app
+    /// recriava um NSImage e redesenhava a barra de menus a cada 0,3 s, para sempre.
+    func icone(_ n: String) {
+        guard n != iconeAtual else { return }
+        iconeAtual = n
+        item.button?.image = sym(n)
+    }
+
     func sym(_ n: String) -> NSImage? {
         let i = NSImage(systemSymbolName: n, accessibilityDescription: "voz"); i?.isTemplate = true; return i
     }
@@ -288,6 +301,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
 
         annItem = NSMenuItem(title: "Anunciar a origem antes", action: #selector(toggleAnn), keyEquivalent: "")
         annItem.target = self; m.addItem(annItem)
+        alertItem = NSMenuItem(title: "Avisar quando precisar de você", action: #selector(toggleAlerts), keyEquivalent: "")
+        alertItem.target = self; m.addItem(alertItem)
         m.addItem(.separator())
         let txt = NSMenuItem(title: "Ler um texto…", action: #selector(showTexto), keyEquivalent: "t")
         txt.target = self; m.addItem(txt)
@@ -494,6 +509,10 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         helpWin = w
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc func toggleAlerts() {
+        writef(ALERTSF, (readf(ALERTSF) ?? "1") == "1" ? "0" : "1"); refreshMenu()
     }
 
     @objc func toggleAnn() {
@@ -1301,10 +1320,15 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         encerrarFala()
     }
 
+    func porTitulo(_ mi: NSMenuItem?, _ t: String) {
+        if mi?.title != t { mi?.title = t }
+    }
+
     func refreshMenu() {
         let isOff = FileManager.default.fileExists(atPath: OFFF)
         offItem?.state = isOff ? .off : .on
         annItem?.state = (readf(ANNF) ?? "1") == "1" ? .on : .off
+        alertItem?.state = (readf(ALERTSF) ?? "1") == "1" ? .on : .off
         volLabel?.stringValue = "\(Int(volume*100))%"; volSlider?.floatValue = volume
         spdLabel?.stringValue = String(format: "%.2fx", speed).replacingOccurrences(of: ".", with: ",")
         spdSlider?.floatValue = speed
@@ -1324,23 +1348,23 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             let taxa = fase == .anuncio ? 1.0 : Double(speed)
             let restante = (p.duration - p.currentTime) / taxa
             if p.isPlaying {
-                item.button?.image = sym("speaker.wave.2.fill")
+                icone("speaker.wave.2.fill")
                 stateItem.title = fase == .anuncio
                     ? "Anunciando\(who)"
                     : "Lendo\(who)  faltam \(mmss(restante))"
                 ppItem.title = "Pausar"
             } else {
-                item.button?.image = sym("pause.fill")
+                icone("pause.fill")
                 stateItem.title = "Pausado\(who)  faltam \(mmss(restante))"; ppItem.title = "Retomar"
             }
             ppItem.isEnabled = true; stopItem.isEnabled = true
         } else if fase != .parado {
             // silêncio proposital entre as partes
-            item.button?.image = sym("speaker.wave.1")
+            icone("speaker.wave.1")
             stateItem.title = "Pausa\(who)"
             ppItem.title = "Pausar"; ppItem.isEnabled = false; stopItem.isEnabled = true
         } else {
-            item.button?.image = sym(isOff ? "speaker.slash.fill" : "speaker.wave.2")
+            icone(isOff ? "speaker.slash.fill" : "speaker.wave.2")
             stateItem.title = isOff ? "Leitura desligada" : "Parado"
             ppItem.title = "Pausar"; ppItem.isEnabled = false; stopItem.isEnabled = false
         }

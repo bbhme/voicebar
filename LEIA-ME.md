@@ -99,7 +99,7 @@ Troque pelo submenu **Voz**, no ícone da barra.
 ## Primeiros passos
 
 Depois de instalar, clique no ícone da barra de menus e escolha **Como usar…**.
-São 20 seções explicando tudo, e há um botão que lê a explicação em voz alta.
+São 21 seções explicando tudo, e há um botão que lê a explicação em voz alta.
 
 No terminal:
 
@@ -129,6 +129,26 @@ O atalho e o item em Serviços podem só aparecer depois que você sair e entrar
 de novo na conta, porque o macOS guarda essa lista em cache. Aplicativos que já
 estavam abertos precisam ser reiniciados para enxergar o novo item. Os caminhos pelo menu,
 que são o primeiro e o quarto, funcionam na hora.
+
+---
+
+## Avisos quando o Claude Code precisa de você
+
+Além de ler as respostas, o sistema avisa em quatro situações:
+
+| Situação | O que você ouve |
+|---|---|
+| Claude fez uma pergunta | `<projeto> fez uma pergunta` |
+| Claude pede permissão | `<projeto> pede permissão` |
+| Claude está esperando você | `<projeto> precisa de você` |
+| O turno terminou em erro | `<projeto> parou com erro` |
+
+O aviso é curto e fura a fila, porque existe para interromper. Avisos iguais do
+mesmo projeto respeitam quinze segundos de intervalo, para uma sequência de
+permissões não virar metralhadora.
+
+Some no menu pelo item **Avisar quando precisar de você**, separado da leitura
+das respostas. Uma resposta que termina em pergunta também é anunciada como tal.
 
 ---
 

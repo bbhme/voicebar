@@ -58,6 +58,12 @@ case "${1:-status}" in
             off|0) echo 0 > "$V/announce"; echo "anúncio desligado";;
             *) echo "anúncio: $([ "$(cat $V/announce 2>/dev/null||echo 1)" = 1 ] && echo ligado || echo desligado)";;
           esac;;
+  avisos|alerts) case "$2" in
+            on|1)  echo 1 > "$V/alerts"; echo "avisos ligados";;
+            off|0) echo 0 > "$V/alerts"; echo "avisos desligados";;
+            *) echo "avisos: $([ "$(cat $V/alerts 2>/dev/null||echo 1)" = 1 ] && echo ligados || echo desligados)"
+               echo "  pergunta | permissao | atencao | erro";;
+          esac;;
   pausa) case "$2" in
             sem|curta|media|média|longa) echo "${2/média/media}" > "$V/pause"; echo "pausa: ${2}";;
             *) echo "pausa atual: $(cat $V/pause 2>/dev/null || echo media)"
@@ -111,6 +117,7 @@ case "${1:-status}" in
           echo "veloc. : $(cat $V/speed 2>/dev/null || echo 1.0)x"
           echo "modo   : $(cat $V/mode 2>/dev/null)"
           echo "anúncio: $([ "$(cat $V/announce 2>/dev/null||echo 1)" = 1 ] && echo ligado || echo desligado)"
+          echo "avisos : $([ "$(cat $V/alerts 2>/dev/null||echo 1)" = 1 ] && echo ligados || echo desligados)"
           echo "fila   : $(find "$R/q" -name '*.job' 2>/dev/null | wc -l | tr -d ' ')"
           m=$(tr '\n' ' ' < "$V/muted.txt" 2>/dev/null); [ -n "$m" ] && echo "mudos  : $m"
           [ -f "$OFF" ] && echo "hook   : DESLIGADO (voice on para religar)" || echo "hook   : ligado";;
@@ -137,6 +144,7 @@ case "${1:-status}" in
      echo
      echo "ANÚNCIO E PAUSAS"
      echo "  announce <on|off>            falar a origem antes da leitura"
+     echo "  avisos <on|off>              avisar quando o Claude precisar de voce"
      echo "  pausa <sem|curta|media|longa>  silêncio ao trocar de projeto"
      echo
      echo "RESUMO POR IA"
