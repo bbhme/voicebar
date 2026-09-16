@@ -112,7 +112,7 @@ let AJUDA: [(String, String)] = [
   "Ler as respostas desmarcado silencia as respostas do Claude Code, mas você continua podendo mandar ler um texto. Sair fecha o app: a leitura das respostas continua funcionando, só que sem controles, sem fila e sem anúncio."),
 
  ("Se o app cair ou travar",
-  "Se ele cair sozinho, volta em cerca de três segundos: o sistema o vigia e o reinicia, mas só quando a saída foi anormal. Quando você escolhe Sair, ele fica fechado, como deve. Se travar sem morrer, o vigia não percebe; nesse caso use voice restart no terminal, que derruba o processo travado e sobe um novo. Para abrir depois de ter saído, use voice bar. E ele sempre volta sozinho quando você faz login."),
+  "Se ele cair sozinho, volta em cerca de três segundos: o sistema o vigia e o reinicia, mas só quando a saída foi anormal. Quando você escolhe Sair, ele fica fechado, como deve. O item Reiniciar o app derruba e sobe de novo na hora, útil depois de qualquer coisa estranha; a fila sobrevive, porque ela são arquivos em disco, e só a fala que estava tocando se perde. Se ele travar a ponto de o menu não abrir, o mesmo efeito vem de voice restart no terminal. Para abrir depois de ter saído, use voice bar. E ele sempre volta sozinho quando você faz login."),
 
  ("Tudo isso também funciona no terminal",
   "Pelo comando voice.  Reprodução: pause, resume, toggle, skip, stop, clear.  Ajustes: vol, speed, use, list.  Fila: fila, pick, mode, mute, unmute, projetos.  Extras: pausa, announce, resumo, say, status.  Sem argumento, cada um mostra o valor atual."),
@@ -320,6 +320,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         let hi = NSMenuItem(title: "Como usar…", action: #selector(showHelp), keyEquivalent: "?"); hi.target = self
         m.addItem(hi)
         m.addItem(.separator())
+        let rei = NSMenuItem(title: "Reiniciar o app", action: #selector(reiniciar), keyEquivalent: "r")
+        rei.target = self; m.addItem(rei)
         let q = NSMenuItem(title: "Sair", action: #selector(quit), keyEquivalent: "q"); q.target = self; m.addItem(q)
         item.menu = m
         rebuildVoices(); rebuildProjects(); rebuildMode(); rebuildPause(); rebuildQueue(); refreshMenu()
@@ -1170,6 +1172,35 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     }
     @objc func limparPrompt() { promptView.string = "" }
 
+    /// Solta um processo que continua vivo depois que este morrer.
+    func solto(_ caminho: String, _ args: [String]) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: caminho)
+        p.arguments = args
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+    }
+
+    /// Reinicia o app. A fila sobrevive, porque ela são arquivos em disco;
+    /// só a fala que estava tocando se perde.
+    @objc func reiniciar() {
+        player?.stop(); player = nil
+        if !nowWav.isEmpty { rm(nowWav) }
+        if !nowAnn.isEmpty { rm(nowAnn) }
+        rm(BARPID)
+        let agente = HOME + "/Library/LaunchAgents/com.claude.voicebar.plist"
+        if FileManager.default.fileExists(atPath: agente) {
+            // o launchd derruba e sobe de novo sozinho
+            solto("/bin/launchctl", ["kickstart", "-k", "gui/\(getuid())/com.claude.voicebar"])
+            // se em dois segundos ele não nos matou, saímos por conta própria
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NSApp.terminate(nil) }
+        } else {
+            solto("/bin/sh", ["-c", "sleep 1; exec '\(VDIR)/voicebar'"])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
+        }
+    }
+
     @objc func quit() { rm(BARPID); NSApp.terminate(nil) }
 
     func setVolume(_ v: Float) { volume = max(0, min(1, v)); player?.volume = volume
@@ -1209,6 +1240,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             case "skip": skip()
             case "clear": clearQueue()
             case "quit":  quit()
+            case "restart": reiniciar()
             case "pick":
                 if p.count > 1, let n = Int(p[1]), n >= 1, n <= queued.count {
                     pularPara(queued[n-1].job)

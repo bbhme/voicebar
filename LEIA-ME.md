@@ -202,7 +202,8 @@ Erros ficam registrados em `~/.claude/hooks/speak-response.log`.
 |---|---|
 | O app caiu sozinho | volta em cerca de três segundos, sem você fazer nada |
 | Você escolheu **Sair** | fica fechado; use `voice bar` para abrir |
-| O app travou sem morrer | use `voice restart` |
+| Alguma coisa estranha | menu, **Reiniciar o app** |
+| O menu nem abre | `voice restart` no terminal |
 | Você reiniciou o Mac | volta sozinho no login |
 
 O sistema vigia o app e o reinicia **apenas quando a saída foi anormal**. Se você
