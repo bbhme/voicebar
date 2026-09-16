@@ -16,6 +16,9 @@ case "${1:-status}" in
   toggle) [ -n "$(bar)" ] && { send toggle; echo alternado; exit 0; }
           p=$(pid); [ -z "$p" ] && { echo "nada tocando"; exit 0; }
           if [ "$(st)" = pausado ]; then kill -CONT "$p"; echo retomado; else kill -STOP "$p"; echo pausado; fi;;
+  repetir|repeat) [ -n "$(bar)" ] && { send repetir; echo "repetindo a última"; exit 0; }
+          W="$R/ultima.wav"
+          [ -s "$W" ] && { afplay -v "$(cat $V/volume 2>/dev/null || echo 1)" "$W"; } || echo "nada para repetir";;
   skip|pular) [ -n "$(bar)" ] && { send skip; echo "pulou"; exit 0; }; echo "app da barra nao esta rodando";;
   clear|limpar) [ -n "$(bar)" ] && { send clear; echo "fila limpa"; exit 0; }
           find "$R/q" -name '*.job' -delete 2>/dev/null; echo "fila limpa";;
@@ -144,6 +147,7 @@ case "${1:-status}" in
      echo "  pause | resume | toggle      pausa, retoma, alterna"
      echo "  silencio                     modo ligação: pausa e segura a fila"
      echo "  skip                         pula a fala atual e chama a próxima"
+     echo "  repetir                      toca de novo a última fala"
      echo "  stop                         descarta a fala atual"
      echo "  clear                        esvazia a fila sem cortar a atual"
      echo

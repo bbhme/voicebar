@@ -99,7 +99,7 @@ Troque pelo submenu **Voz**, no ícone da barra.
 ## Primeiros passos
 
 Depois de instalar, clique no ícone da barra de menus e escolha **Como usar…**.
-São 23 seções explicando tudo, e há um botão que lê a explicação em voz alta.
+São 24 seções explicando tudo, e há um botão que lê a explicação em voz alta.
 
 No terminal:
 

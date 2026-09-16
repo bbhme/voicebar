@@ -21,6 +21,9 @@ let KEYF = VDIR + "/openai.env"
 let PAUSEF = VDIR + "/pause"
 let ALERTSF = VDIR + "/alerts"
 let HOTKEYF = VDIR + "/hotkey"
+let ULTWAV = RDIR + "/ultima.wav"
+let ULTANN = RDIR + "/ultima-a.wav"
+let ULTPROJ = RDIR + "/ultima.proj"
 let PROMPTF = VDIR + "/summary_prompt.txt"
 let LABELSF = VDIR + "/labels.txt"
 
@@ -67,6 +70,9 @@ let AJUDA: [(String, String)] = [
 
  ("Ouvir, pausar, pular e parar",
   "Pausar congela no ponto exato e vira Retomar.  Pular esta abandona a fala atual e chama a próxima da fila.  Parar descarta a fala atual inteira.  Limpar a fila joga fora tudo que espera, sem interromper a que está tocando."),
+
+ ("Repetir a última",
+  "Toca de novo a última resposta lida, com o anúncio do projeto junto. Ela fica guardada em disco, então dá para repetir quantas vezes quiser e continua disponível mesmo depois de reiniciar o app. Avisos e a ajuda falada não contam como a última: repetir traz a resposta, não o aviso que veio depois dela. Se algo estiver tocando, ele volta para a fila em vez de se perder, e o silêncio é desligado, porque pedir para repetir é pedir para ouvir."),
 
  ("Volume e velocidade",
   "Os dois controles deslizantes valem na hora, no meio da frase, não apenas na próxima fala. A velocidade vai de 0,6x até 1,8x e preserva o tom da voz, então acelerar não deixa ela fina. Perto do normal o controle encaixa exatamente em 1x sozinho, e o item Velocidade normal devolve para 1x com um clique."),
@@ -162,7 +168,8 @@ let ATALHOS: [(id: String, rotulo: String, tecla: UInt32, mods: UInt32,
 /// desta referência global para alcançar o controlador.
 weak var controladorGlobal: Controller?
 
-struct Job { let job: String; let wav: String; let ann: String; let proj: String; let ts: Double; let prio: Bool }
+struct Job { let job: String; let wav: String; let ann: String; let proj: String
+             let ts: Double; let prio: Bool; let rep: Bool }
 enum Fase { case parado, anuncio, conteudo }
 
 /// Pausas, em segundos. A do "trocou" é maior de propósito: dá tempo ao ouvido
@@ -183,13 +190,14 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     var nowWav = ""
     var nowAnn = ""
     var nowTs: Double = 0
+    var nowRep = true        // avisos e a ajuda não viram "a última"
     var fase: Fase = .parado
     var geracao = 0          // invalida reproduções agendadas que ficaram obsoletas
     var ultimoProj = ""      // para saber se houve troca de projeto
     var queueSig = ""
     var helpWin: NSWindow?
     var queued: [Job] = []
-    var stateItem, queueItem, ppItem, skipItem, stopItem, clearItem, offItem, annItem, alertItem, silItem: NSMenuItem!
+    var stateItem, queueItem, ppItem, skipItem, stopItem, clearItem, offItem, annItem, alertItem, silItem, repItem: NSMenuItem!
     var voiceMenu, projMenu, modeMenu, queueMenu, pauseMenu, hotkeyMenu: NSMenu!
     var volLabel, spdLabel: NSTextField!
     var volSlider, spdSlider: NSSlider!
@@ -311,9 +319,11 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         silItem.target = self; m.addItem(silItem)
         ppItem = NSMenuItem(title: "Pausar", action: #selector(togglePlay), keyEquivalent: ""); ppItem.target = self
         skipItem = NSMenuItem(title: "Pular esta", action: #selector(skip), keyEquivalent: ""); skipItem.target = self
+        repItem = NSMenuItem(title: "Repetir a última", action: #selector(repetirUltima), keyEquivalent: "")
+        repItem.target = self
         stopItem = NSMenuItem(title: "Parar", action: #selector(stopPlay), keyEquivalent: ""); stopItem.target = self
         clearItem = NSMenuItem(title: "Limpar a fila", action: #selector(clearQueue), keyEquivalent: ""); clearItem.target = self
-        [ppItem, skipItem, stopItem, clearItem].forEach { m.addItem($0!) }
+        [ppItem, skipItem, repItem, stopItem, clearItem].forEach { m.addItem($0!) }
         m.addItem(.separator())
 
         let (vB, vS, vL) = sliderRow("Volume", "speaker.fill", "speaker.wave.3.fill", 0, 1, volume, #selector(volChanged), ticks: false)
@@ -411,7 +421,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         guard let alvo = scanQueue().first(where: { $0.job == jobPath }) else { return }
         if player != nil, !nowWav.isEmpty {
             let volta = QDIR + "/\(Int(nowTs))-devolvido.job"
-            writef(volta, "wav=\(nowWav)\nann=\(nowAnn)\nproj=\(nowProj)\nsess=\nts=\(Int(nowTs))\nprio=0\n")
+            writef(volta, "wav=\(nowWav)\nann=\(nowAnn)\nproj=\(nowProj)\nsess=\nts=\(Int(nowTs))\nprio=0\nrep=\(nowRep ? 1 : 0)\n")
             player?.stop(); player = nil; nowWav = ""
         }
         rm(alvo.job)
@@ -774,10 +784,10 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
                     if n > 0 { self.atualizaContagem() }
                 }
                 let j = Job(job: "", wav: out, ann: ann, proj: origem,
-                            ts: Date().timeIntervalSince1970, prio: true)
+                            ts: Date().timeIntervalSince1970, prio: true, rep: true)
                 if self.player != nil, !self.nowWav.isEmpty {
                     let volta = QDIR + "/\(Int(self.nowTs))-devolvido.job"
-                    writef(volta, "wav=\(self.nowWav)\nann=\(self.nowAnn)\nproj=\(self.nowProj)\nsess=\nts=\(Int(self.nowTs))\nprio=0\n")
+                    writef(volta, "wav=\(self.nowWav)\nann=\(self.nowAnn)\nproj=\(self.nowProj)\nsess=\nts=\(Int(self.nowTs))\nprio=0\nrep=\(self.nowRep ? 1 : 0)\n")
                     self.player?.stop(); self.player = nil; self.nowWav = ""
                 }
                 self.play(j)
@@ -800,7 +810,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             pr.waitUntilExit()
             guard pr.terminationStatus == 0 else { return }
             DispatchQueue.main.async {
-                self.play(Job(job: "", wav: out, ann: "", proj: "ajuda", ts: Date().timeIntervalSince1970, prio: true))
+                self.play(Job(job: "", wav: out, ann: "", proj: "ajuda", ts: Date().timeIntervalSince1970, prio: true, rep: false))
             }
         }
     }
@@ -919,7 +929,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             guard self.rodar(VDIR + "/synth.sh", [voz, out], entrada: fala + ".") != nil else { return }
             DispatchQueue.main.async {
                 self.play(Job(job: "", wav: out, ann: "", proj: proj,
-                              ts: Date().timeIntervalSince1970, prio: true))
+                              ts: Date().timeIntervalSince1970, prio: true, rep: false))
             }
         }
     }
@@ -1312,7 +1322,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
                 if kv.count == 2 { d[kv[0]] = kv[1] }
             }
             guard let w = d["wav"], let ts = Double(d["ts"] ?? "") else { continue }
-            out.append(Job(job: path, wav: w, ann: d["ann"] ?? "", proj: d["proj"] ?? "?", ts: ts, prio: (d["prio"] ?? "0") == "1"))
+            out.append(Job(job: path, wav: w, ann: d["ann"] ?? "", proj: d["proj"] ?? "?",
+                           ts: ts, prio: (d["prio"] ?? "0") == "1", rep: (d["rep"] ?? "1") == "1"))
         }
         return out.sorted { $0.ts < $1.ts }
     }
@@ -1331,6 +1342,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             case "quit":  quit()
             case "restart": reiniciar()
             case "silencio": toggleSilencio()
+            case "repetir": repetirUltima()
             case "pick":
                 if p.count > 1, let n = Int(p[1]), n >= 1, n <= queued.count {
                     pularPara(queued[n-1].job)
@@ -1392,7 +1404,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         let trocou = !ultimoProj.isEmpty && ultimoProj != j.proj
         let antes = trocou ? p.trocou : p.mesmo
 
-        nowProj = j.proj; nowWav = j.wav; nowAnn = j.ann; nowTs = j.ts
+        nowProj = j.proj; nowWav = j.wav; nowAnn = j.ann; nowTs = j.ts; nowRep = j.rep
         ultimoProj = j.proj
 
         let temAnuncio = !j.ann.isEmpty && FileManager.default.fileExists(atPath: j.ann)
@@ -1422,10 +1434,56 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
 
     func encerrarFala() {
         player = nil; fase = .parado
-        if !nowWav.isEmpty { rm(nowWav); nowWav = "" }
-        if !nowAnn.isEmpty { rm(nowAnn); nowAnn = "" }
-        nowProj = ""
+        guardarComoUltima()
+        nowWav = ""; nowAnn = ""; nowProj = ""
         refreshMenu()
+    }
+
+    /// Em vez de apagar o que acabou de tocar, move para um lugar fixo.
+    /// É o que permite repetir depois, inclusive após reiniciar o app.
+    func guardarComoUltima() {
+        let fm = FileManager.default
+        guard nowRep, !nowWav.isEmpty, fm.fileExists(atPath: nowWav), nowWav != ULTWAV else {
+            if !nowWav.isEmpty && nowWav != ULTWAV { rm(nowWav) }
+            if !nowAnn.isEmpty && nowAnn != ULTANN { rm(nowAnn) }
+            return
+        }
+        rm(ULTWAV); rm(ULTANN)
+        try? fm.moveItem(atPath: nowWav, toPath: ULTWAV)
+        if !nowAnn.isEmpty, fm.fileExists(atPath: nowAnn) {
+            try? fm.moveItem(atPath: nowAnn, toPath: ULTANN)
+        }
+        writef(ULTPROJ, nowProj)
+    }
+
+    func temUltima() -> Bool {
+        let fm = FileManager.default
+        guard let a = try? fm.attributesOfItem(atPath: ULTWAV),
+              let t = a[.size] as? Int else { return false }
+        return t > 1024
+    }
+
+    /// Repete a última fala. Copia antes de tocar, para o guardado sobreviver
+    /// e poder ser repetido de novo.
+    @objc func repetirUltima() {
+        guard temUltima() else { return }
+        let fm = FileManager.default
+        let carimbo = Int(Date().timeIntervalSince1970)
+        let w = RDIR + "/rep-\(carimbo).wav"
+        let a = RDIR + "/rep-a-\(carimbo).wav"
+        rm(w); rm(a)
+        guard (try? fm.copyItem(atPath: ULTWAV, toPath: w)) != nil else { return }
+        var ann = ""
+        if fm.fileExists(atPath: ULTANN), (try? fm.copyItem(atPath: ULTANN, toPath: a)) != nil { ann = a }
+        let proj = readf(ULTPROJ) ?? "repetição"
+        // devolve para a fila o que estiver tocando, como o texto selecionado faz
+        if player != nil, !nowWav.isEmpty {
+            let volta = QDIR + "/\(Int(nowTs))-devolvido.job"
+            writef(volta, "wav=\(nowWav)\nann=\(nowAnn)\nproj=\(nowProj)\nsess=\nts=\(Int(nowTs))\nprio=0\nrep=\(nowRep ? 1 : 0)\n")
+            player?.stop(); player = nil; nowWav = ""; nowAnn = ""
+        }
+        silencio = false
+        play(Job(job: "", wav: w, ann: ann, proj: proj, ts: Date().timeIntervalSince1970, prio: true, rep: false))
     }
 
     func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully f: Bool) {
@@ -1435,7 +1493,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             let conteudo = nowWav
             fase = .conteudo
             player = nil
-            if !nowAnn.isEmpty { rm(nowAnn); nowAnn = "" }
+            // o anúncio fica em disco até o fim do trabalho: ele faz parte
+            // do que se repete, e some junto com o conteúdo
             refreshMenu()
             DispatchQueue.main.asyncAfter(deadline: .now() + pausas().apos) {
                 guard gen == self.geracao else { return }
@@ -1468,6 +1527,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             queueItem.title = "Na fila: \(queued.count) · \(names)"
         }
         clearItem.isEnabled = !queued.isEmpty
+        repItem?.isEnabled = temUltima()
         skipItem.isEnabled = player != nil || fase != .parado
 
         let who = nowProj.isEmpty ? "" : " · \(nowProj)"

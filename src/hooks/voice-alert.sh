@@ -59,7 +59,7 @@ printf '%s.' "$FRASE" | "$V/synth.sh" "$VOZ" "$WAV" 2>>"$LOG" || exit 0
 BAR=$(cat "$R/bar.pid" 2>/dev/null)
 if [ -n "$BAR" ] && kill -0 "$BAR" 2>/dev/null; then
   # prio=1 fura a fila; sem ann porque o aviso já diz o projeto
-  printf 'wav=%s\nann=\nproj=%s\nsess=\nts=%s\nprio=1\n' "$WAV" "aviso · $NOME" "$AGORA" \
+  printf 'wav=%s\nann=\nproj=%s\nsess=\nts=%s\nprio=1\nrep=0\n' "$WAV" "aviso · $NOME" "$AGORA" \
     > "$Q/$AGORA-alerta-$$.job"
 else
   afplay -v "$(cat "$V/volume" 2>/dev/null || echo 1)" "$WAV" >/dev/null 2>&1 &
