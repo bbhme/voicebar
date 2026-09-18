@@ -17,7 +17,8 @@ Most read-aloud scripts break the moment you run more than one agent. This one
 was built around that problem:
 
 - **A real queue.** When several Claude Code sessions finish at once, the
-  answers line up instead of cutting each other off.
+  answers line up in arrival order instead of cutting each other off. Alerts
+  wait their turn too, and each one is said only once.
 - **Each answer says where it came from**, at normal speed and slightly louder,
   so you know who is talking without looking at the screen.
 - **A longer silence when the project changes**, so your ear registers the

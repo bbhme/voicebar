@@ -4,6 +4,28 @@ V="$HOME/.claude/voice"; R="$V/run"; PIDF="$R/play.pid"; OFF="$HOME/.claude/hook
 mkdir -p "$R"
 bar(){ b=$(cat "$R/bar.pid" 2>/dev/null); [ -n "$b" ] && kill -0 "$b" 2>/dev/null && echo "$b"; }
 send(){ echo "$*" > "$R/cmd"; }
+# Nome de cada sessão do Claude Code aberta agora, um por linha (repete se houver
+# várias no mesmo projeto). Mesma regra do menu Projetos que falam.
+abertos(){
+  local f pid ini ms cwd nome
+  for f in "$HOME/.claude/sessions"/*.json; do
+    [ -f "$f" ] || continue
+    pid=$(basename "$f" .json); kill -0 "$pid" 2>/dev/null || continue
+    ini=$(TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" | sed 's/ *$//')
+    ini=$(LC_ALL=C date -j -u -f "%a %b %e %T %Y" "$ini" +%s 2>/dev/null) || continue
+    # registro que sobrou de uma sessão que caiu, com o PID reaproveitado
+    ms=$(jq -r '.startedAt // 0' "$f" 2>/dev/null)
+    [ "$ms" != 0 ] && [ "$ini" -gt $(( ms / 1000 + 5 )) ] && continue
+    nome=""
+    [ -f "$R/sessoes/$pid" ] && [ "$(stat -f %m "$R/sessoes/$pid")" -ge "$ini" ] && nome=$(cat "$R/sessoes/$pid")
+    if [ -z "$nome" ]; then
+      cwd=$(jq -r '.cwd // empty' "$f" 2>/dev/null)
+      case "$cwd" in */.claude/worktrees/*) nome=${cwd#*/.claude/worktrees/}; nome=${nome%%/*};;
+                     *) nome=$(basename "$cwd");; esac
+    fi
+    [ -n "$nome" ] && echo "$nome"
+  done
+}
 pid(){ [ -f "$PIDF" ] && p=$(cat "$PIDF" 2>/dev/null) && kill -0 "$p" 2>/dev/null && echo "$p"; }
 st(){ p=$(pid); [ -z "$p" ] && { echo parado; return; }
       s=$(ps -o stat= -p "$p" 2>/dev/null); case "$s" in *T*) echo pausado;; *) echo tocando;; esac; }
@@ -27,21 +49,32 @@ case "${1:-status}" in
           echo "app da barra nao esta rodando";;
   queue|fila) n=$(find "$R/q" -name '*.job' 2>/dev/null | wc -l | tr -d ' ')
           echo "na fila: $n"
-          for f in $(ls -t "$R/q"/*.job 2>/dev/null); do echo "  $(grep '^proj=' $f | cut -d= -f2)"; done;;
+          # na ordem em que vão tocar, com o número que o voice pick usa
+          i=0; for f in $(ls "$R/q"/*.job 2>/dev/null); do
+            i=$((i+1)); echo "  $i. $(grep '^proj=' $f | cut -d= -f2)"; done;;
   mute|silenciar) [ -z "$2" ] && { echo "silenciados:"; sed 's/^/  /' "$V/muted.txt" 2>/dev/null; exit 0; }
           grep -qxF "$2" "$V/muted.txt" 2>/dev/null || echo "$2" >> "$V/muted.txt"; echo "$2 silenciado";;
   unmute|ativar) [ -z "$2" ] && { : > "$V/muted.txt"; echo "todos ativados"; exit 0; }
           grep -vxF "$2" "$V/muted.txt" > "$V/.m" 2>/dev/null; mv "$V/.m" "$V/muted.txt"; echo "$2 ativado";;
   mode|modo) [ -z "$2" ] && { echo "modo atual: $(cat $V/mode 2>/dev/null)"; exit 0; }
           case "$2" in fila|ultima) echo "$2" > "$V/mode"; echo "modo: $2";; *) echo "use: fila | ultima";; esac;;
-  projects|projetos) echo "projetos vistos (e o que cada um fala):"
-          while read -r p; do
+  projects|projetos)
+          if [ "$2" != todos ] && [ -d "$HOME/.claude/sessions" ]; then
+            echo "projetos com sessão aberta agora (e o que cada um fala):"
+            LISTA=$(abertos | sort -f | uniq -c | sed 's/^ *//')
+            [ -z "$LISTA" ] && echo "  nenhuma sessão do Claude Code aberta"
+          else
+            echo "projetos que já falaram (e o que cada um fala):"
+            LISTA=$(sed 's/^/1 /' "$V/projects.txt" 2>/dev/null)
+          fi
+          printf '%s\n' "$LISTA" | while read -r n p; do
             [ -z "$p" ] && continue
             L=$(grep "^$p|" "$V/labels.txt" 2>/dev/null | head -1 | cut -d'|' -f2-)
             [ -z "$L" ] && L=$(printf '%s' "$p" | tr '_.-' '   ' | sed 's/  */ /g; s/^ //; s/ $//')
             M=$(grep -qxF "$p" "$V/muted.txt" 2>/dev/null && echo " [mudo]")
-            printf "  %-24s \"%s\"%s\n" "$p" "$L" "$M"
-          done < "$V/projects.txt" 2>/dev/null;;
+            S=""; [ "${n:-1}" -gt 1 ] && S=" ($n sessões)"
+            printf "  %-24s \"%s\"%s%s\n" "$p" "$L" "$S" "$M"
+          done;;
   legenda|label) p="$2"
           [ -z "$p" ] && { echo "o que cada projeto fala:"; sed 's/|/  ->  /;s/^/  /' "$V/labels.txt" 2>/dev/null
                            [ -s "$V/labels.txt" ] || echo "  (nenhuma legenda; todos usam o nome da pasta)"; exit 0; }
@@ -162,7 +195,8 @@ case "${1:-status}" in
      echo "  pick <n>                     ouve o item n; o atual volta para a fila"
      echo "  mode <fila|ultima>           enfileirar tudo ou só a mais recente"
      echo "  mute <proj> | unmute [proj]  silencia ou reativa um projeto"
-     echo "  projetos                     lista os projetos já vistos"
+     echo "  projetos                     lista os projetos com sessão aberta agora"
+     echo "  projetos todos               lista todos os que já falaram"
      echo
      echo "ANÚNCIO E PAUSAS"
      echo "  announce <on|off>            falar a origem antes da leitura"

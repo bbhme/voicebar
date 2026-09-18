@@ -143,9 +143,12 @@ Além de ler as respostas, o sistema avisa em quatro situações:
 | Claude está esperando você | `<projeto> precisa de você` |
 | O turno terminou em erro | `<projeto> parou com erro` |
 
-O aviso é curto e fura a fila, porque existe para interromper. Avisos iguais do
-mesmo projeto respeitam quinze segundos de intervalo, para uma sequência de
-permissões não virar metralhadora.
+O aviso é curto e entra na fila como qualquer outra fala: espera a atual
+terminar, sem interromper. Cada situação é avisada uma vez só. O Claude Code
+repete o pedido de permissão alguns segundos depois e diz que está esperando um
+minuto após cada resposta; esses ecos são ignorados, porque a resposta lida já
+disse de qual projeto ela era. Um aviso igual que ainda espera na fila não ganha
+cópia, e avisos iguais do mesmo projeto respeitam quinze segundos de intervalo.
 
 Some no menu pelo item **Avisar quando precisar de você**, separado da leitura
 das respostas. Uma resposta que termina em pergunta também é anunciada como tal.

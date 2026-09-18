@@ -41,6 +41,7 @@ desliga explicitamente. Veja `CREDITS.md`.
 | `~/.claude/voice/labels.txt` | as legendas que você escreveu | padrão |
 | `~/.claude/voice/summary_prompt.txt` | suas instruções para a IA | padrão |
 | `~/.claude/voice/run/` | áudios temporários, apagados após tocar | padrão |
+| `~/.claude/voice/run/sessoes/` | o nome de projeto de cada sessão aberta | padrão |
 | `~/.claude/hooks/speak-response.log` | erros e um resumo de cada leitura | padrão |
 
 **A chave da OpenAI fica num arquivo comum, não no Chaveiro do macOS.** A
@@ -50,6 +51,11 @@ use o resumo por IA.
 
 O log registra o tamanho dos textos e o nome dos projetos, não o conteúdo das
 respostas.
+
+Para listar só os projetos abertos, o app e os gatilhos leem o registro de
+sessões que o próprio Claude Code mantém em `~/.claude/sessions/`. Usam apenas o
+número do processo, a pasta e o horário de início de cada sessão; nada é
+gravado ali e nada sai da máquina.
 
 ## O que o instalador altera
 

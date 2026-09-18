@@ -85,20 +85,50 @@ mkdir -p "$V/run/q"
 if ! pgrep -x voicebar >/dev/null; then
   nao "o app da barra não está rodando; inicie com: voice bar"
 else
-  # o app só puxa da fila quando está ocioso, então limpamos antes e damos tempo
-  echo stop  > "$V/run/cmd"; sleep 0.5
-  echo clear > "$V/run/cmd"; sleep 0.5
-  J="$V/run/q/9999999999-teste.job"
-  printf 'wav=%s\nann=\nproj=teste-de-fumaca\nsess=\nts=9999999999\nprio=0\n' "$TMP/cadu.wav" > "$J"
-  CONSUMIU=0
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    [ -f "$J" ] || { CONSUMIU=1; break; }
-    sleep 0.5
-  done
-  if [ "$CONSUMIU" = "1" ]; then ok "o app consumiu o item da fila"
-  else rm -f "$J"; nao "o app não consumiu o item da fila em 5 segundos"; fi
-  echo stop > "$V/run/cmd"
+  # o app só puxa da fila quando está ocioso. Se houver fala tocando ou
+  # esperando, o teste não a descarta: é resposta sua, e não volta mais.
+  if ! grep -q 'fase=parado player=nil' "$V/run/estado" 2>/dev/null || ls "$V/run/q"/*.job >/dev/null 2>&1; then
+    ok "fila ocupada com falas de verdade; teste da fila pulado para não descartá-las"
+  else
+    J="$V/run/q/9999999999-teste.job"
+    # rep=0: o áudio de teste não pode tomar o lugar da sua última fala
+    printf 'wav=%s\nann=\nproj=teste-de-fumaca\nsess=\nts=9999999999\nprio=0\nrep=0\n' "$TMP/cadu.wav" > "$J"
+    CONSUMIU=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      [ -f "$J" ] || { CONSUMIU=1; break; }
+      sleep 0.5
+    done
+    if [ "$CONSUMIU" = "1" ]; then ok "o app consumiu o item da fila"
+    else rm -f "$J"; nao "o app não consumiu o item da fila em 5 segundos"; fi
+    echo stop > "$V/run/cmd"
+  fi
 fi
+
+step "7  Avisos: nada se repete, nada fura a fila"
+# Roda os ganchos num HOME falso, com um "app" de mentira vivo, para que
+# escrevam na fila em vez de tocar. A fila real não é tocada.
+FH="$TMP/home"; FV="$FH/.claude/voice"; FHK="$FH/.claude/hooks"; FQ="$FV/run/q"
+mkdir -p "$FQ" "$FHK"
+for f in synth.sh speak.py speak_kokoro.py summarize.sh projeto.sh voices.txt venv kvenv models kokoro esp lang lang.active current; do
+  [ -e "$V/$f" ] && ln -s "$V/$f" "$FV/$f"
+done
+echo 1 > "$FV/alerts"; echo 1 > "$FV/announce"
+cp "$HOME/.claude/hooks/speak-response.sh" "$HOME/.claude/hooks/speak-response.py" "$HOME/.claude/hooks/voice-alert.sh" "$FHK/"
+sleep 120 & FALSO=$!; echo "$FALSO" > "$FV/run/bar.pid"
+fila(){ ls "$FQ"/*.job 2>/dev/null | wc -l | tr -d ' '; }
+ev(){ printf '{"session_id":"%s","cwd":"/x/teste","notification_type":"%s","transcript_path":"%s"}' "$1" "$2" "$3"; }
+ev s1 permission_prompt | HOME="$FH" "$FHK/voice-alert.sh" atencao
+[ "$(fila)" = 0 ] && ok "eco do pedido de permissão é ignorado" || nao "eco do pedido de permissão virou aviso"
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Pronto."}]}}' > "$TMP/t.jsonl"
+ev s2 "" "$TMP/t.jsonl" | HOME="$FH" "$FHK/speak-response.sh"
+ev s2 idle_prompt | HOME="$FH" "$FHK/voice-alert.sh" atencao
+[ "$(fila)" = 1 ] && ok "resposta lida não ganha \"precisa de você\" depois" || nao "resposta lida ganhou aviso de espera ($(fila) na fila)"
+ev s3 "" | HOME="$FH" "$FHK/voice-alert.sh" permissao
+rm -f "$FV/run/alert/"*
+ev s3 "" | HOME="$FH" "$FHK/voice-alert.sh" permissao
+[ "$(fila)" = 2 ] && ok "aviso igual esperando na fila não é duplicado" || nao "aviso duplicado na fila ($(fila))"
+grep -qx 'prio=0' "$FQ"/*-alerta-*.job 2>/dev/null && ok "aviso espera a vez, sem furar a fila" || nao "aviso fura a fila"
+kill "$FALSO" 2>/dev/null; wait "$FALSO" 2>/dev/null
 
 step "Resultado"
 if [ "$FALHAS" -eq 0 ]; then

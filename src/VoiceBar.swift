@@ -17,6 +17,8 @@ let ANNF = VDIR + "/announce"
 let OFFF = HOME + "/.claude/hooks/voice.off"
 let BARPID = RDIR + "/bar.pid"
 let CONFF = VDIR + "/summary.conf"
+let SESSDIR = HOME + "/.claude/sessions"     // registro do Claude Code: um arquivo por sessão aberta
+let SESSNOMES = RDIR + "/sessoes"            // o nome que cada sessão usou ao falar, anotado pelos ganchos
 let KEYF = VDIR + "/openai.env"
 let PAUSEF = VDIR + "/pause"
 let ALERTSF = VDIR + "/alerts"
@@ -29,8 +31,10 @@ let ESTADOF = RDIR + "/estado"
 let PROMPTF = VDIR + "/summary_prompt.txt"
 let LABELSF = VDIR + "/labels.txt"
 
-let MAX_AGE: Double = 180     // descarta fala com mais de 3 min de espera
-let MAX_QUEUE = 4             // guarda no máximo 4 na fila
+// Numa fila indiana ninguém fura, então a espera cresce com o número de sessões.
+// Os limites dão folga para isso sem acumular respostas que já perderam o sentido.
+let MAX_AGE: Double = 600     // descarta fala com mais de 10 min de espera
+let MAX_QUEUE = 10            // guarda no máximo 10 na fila
 
 func readf(_ p: String) -> String? {
     guard let s = try? String(contentsOfFile: p, encoding: .utf8) else { return nil }
@@ -42,6 +46,51 @@ func lines(_ p: String) -> [String] {
 func writef(_ p: String, _ s: String) { try? s.write(toFile: p, atomically: true, encoding: .utf8) }
 func mmss(_ t: TimeInterval) -> String { let s = max(0, Int(t.rounded())); return String(format: "%d:%02d", s/60, s%60) }
 func rm(_ p: String) { try? FileManager.default.removeItem(atPath: p) }
+
+/// Quando o processo começou, em segundos desde 1970; nil se ele não existe mais.
+func inicioDoProcesso(_ pid: Int32) -> Double? {
+    var info = kinfo_proc()
+    var tam = MemoryLayout<kinfo_proc>.stride
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+    guard sysctl(&mib, 4, &info, &tam, nil, 0) == 0, tam > 0 else { return nil }
+    let t = info.kp_proc.p_starttime
+    return Double(t.tv_sec) + Double(t.tv_usec) / 1_000_000
+}
+
+/// A mesma regra de projeto.sh: dentro de um worktree vale o nome dele; fora, o da pasta.
+func nomeDaPasta(_ cwd: String) -> String {
+    if let r = cwd.range(of: "/.claude/worktrees/"),
+       let n = cwd[r.upperBound...].split(separator: "/").first { return String(n) }
+    return (cwd as NSString).lastPathComponent
+}
+
+/// Projetos com sessão do Claude Code aberta agora, e quantas sessões cada um tem.
+/// Devolve nil quando o Claude Code não mantém o registro de sessões; aí o menu
+/// volta a mostrar todos os projetos que já falaram, como antes.
+func projetosAbertos() -> [String: Int]? {
+    let fm = FileManager.default
+    guard let arqs = try? fm.contentsOfDirectory(atPath: SESSDIR) else { return nil }
+    var out: [String: Int] = [:]
+    for a in arqs where a.hasSuffix(".json") {
+        guard let pid = Int32(a.dropLast(5)), let inicio = inicioDoProcesso(pid),
+              let dados = fm.contents(atPath: SESSDIR + "/" + a),
+              let o = (try? JSONSerialization.jsonObject(with: dados)) as? [String: Any]
+        else { continue }
+        // registro que sobrou de uma sessão que caiu, com o PID já reaproveitado
+        // por outro programa: o processo de agora nasceu depois da sessão registrada
+        if let ms = (o["startedAt"] as? NSNumber)?.doubleValue, inicio > ms / 1000 + 5 { continue }
+        // o nome que a sessão usou ao falar, desde que anotado por este mesmo processo;
+        // sem ele, o da pasta onde ela foi aberta
+        var nome = ""
+        let anot = SESSNOMES + "/\(pid)"
+        if let n = readf(anot),
+           let m = (try? fm.attributesOfItem(atPath: anot))?[.modificationDate] as? Date,
+           m.timeIntervalSince1970 >= inicio { nome = n }
+        if nome.isEmpty, let cwd = o["cwd"] as? String { nome = nomeDaPasta(cwd) }
+        if !nome.isEmpty { out[nome, default: 0] += 1 }
+    }
+    return out
+}
 
 /// Frase falada vinda do pacote de idioma ativo, com reserva embutida.
 func fala(_ chave: String, _ reserva: String) -> String {
@@ -68,7 +117,7 @@ let AJUDA: [(String, String)] = [
   "A primeira diz o que acontece agora: Anunciando com o nome do projeto, Pausa durante os silêncios, Lendo com o tempo que ainda falta, ou Parado. A segunda só aparece quando há espera, e mostra quantas falas estão na fila e de quais projetos."),
 
  ("Silêncio, para quando o telefone toca",
-  "Um atalho de teclado que vale de qualquer aplicativo alterna o modo Silêncio. Ele não é a mesma coisa que pausar: além de congelar a fala atual, segura a fila inteira, inclusive avisos e leituras que normalmente teriam prioridade. Sem isso, a resposta seguinte começaria a falar no meio da sua ligação, que é justamente o que se quer evitar. O ícone vira uma lua e a primeira linha mostra quantas falas estão esperando. Apertar de novo retoma tudo de onde parou. O atalho sai de fábrica em Control Option P e pode ser trocado no submenu Atalho para pausar."),
+  "Um atalho de teclado que vale de qualquer aplicativo alterna o modo Silêncio. Ele não é a mesma coisa que pausar: além de congelar a fala atual, segura a fila inteira, inclusive os avisos e o texto selecionado, que normalmente passaria na frente. Sem isso, a resposta seguinte começaria a falar no meio da sua ligação, que é justamente o que se quer evitar. O ícone vira uma lua e a primeira linha mostra quantas falas estão esperando. Apertar de novo retoma tudo de onde parou. O atalho sai de fábrica em Control Option P e pode ser trocado no submenu Atalho para pausar."),
 
  ("Ouvir, pausar, pular e parar",
   "Pausar congela no ponto exato e vira Retomar.  Pular esta abandona a fala atual e chama a próxima da fila.  Parar descarta a fala atual inteira.  Limpar a fila joga fora tudo que espera, sem interromper a que está tocando."),
@@ -83,13 +132,13 @@ let AJUDA: [(String, String)] = [
   "São sete vozes brasileiras, de dois motores. Dora, Alex e Santa vêm do Kokoro: soam mais naturais, saem em 24 kHz e levam cerca de dois segundos para gerar. Cadu, Faber, Jeff e Edresson vêm do Piper: são mais rápidas, cerca de um segundo. A troca vale a partir da próxima fala."),
 
  ("A fila, quando várias sessões terminam juntas",
-  "Em vez de se atropelarem, as falas entram na fila e tocam uma depois da outra. A fila guarda até quatro e descarta o que passou de três minutos esperando, porque uma resposta velha já não interessa."),
+  "As falas entram numa fila indiana e tocam uma depois da outra, na ordem em que chegaram. Nada que chega sozinho interrompe o que está tocando, nem os avisos: espera a vez em silêncio. Só o que você pede na hora, como o texto selecionado ou Repetir a última, passa na frente. A fila guarda até dez e descarta o que passou de dez minutos esperando, porque uma resposta velha já não interessa."),
 
  ("Ver a fila e escolher o que ouvir",
   "O submenu Fila mostra quem está falando, marcado com um triângulo, e quem espera, numerado e com o tempo de espera de cada um. Clique em qualquer item da espera para ouvi-lo agora. O que estava tocando volta para a fila na posição dele, então nada se perde."),
 
  ("Silenciar um projeto",
-  "O submenu Projetos que falam lista cada projeto que já falou, com uma marca de seleção. Desmarque para silenciar. O bloqueio acontece antes de gerar o áudio, então um projeto silenciado não consome processamento nenhum. Ativar todos religa tudo de uma vez."),
+  "O submenu Projetos que falam lista os projetos com sessão do Claude Code aberta agora, com uma marca de seleção e, quando há mais de uma, quantas sessões são. Desmarque para silenciar. Projeto fechado sai da lista, mas continua silenciado, e volta desmarcado quando for reaberto. O nome de cada sessão é a pasta onde ela foi aberta, ou o worktree em que ela está trabalhando; entrar numa subpasta não muda o nome. O bloqueio acontece antes de gerar o áudio, então um projeto silenciado não consome processamento nenhum. Ativar todos religa tudo de uma vez."),
 
  ("Dar um nome falado a cada projeto",
   "No mesmo submenu, Como cada um é falado abre uma janela com um campo por projeto. O que você escrever ali é o que a voz diz antes da resposta, no lugar do nome da pasta. Serve para acrescentar uma explicação a uma sigla, ou para substituir um nome técnico difícil de ouvir, cheio de pontos e hifens, por algo curto e claro. Cada linha tem um botão de ouvir, para conferir antes de salvar. Deixando em branco, volta a valer o nome da pasta."),
@@ -110,7 +159,7 @@ let AJUDA: [(String, String)] = [
   "O campo de texto livre na mesma janela manda mais que as regras internas do resumidor, então serve para o que você quiser: mudar o tom, dizer como tratar símbolos e siglas, proteger números e nomes que nunca podem sumir, ou pedir que a resposta comece pelo resultado. O botão Exemplos abre oito instruções prontas, que você pode inserir e depois editar. Deixe em branco para usar só o padrão."),
 
  ("Avisos quando o Claude Code precisa de você",
-  "Além de ler as respostas, o sistema avisa em quatro situações: quando o Claude faz uma pergunta, quando pede permissão para executar algo, quando fica parado esperando você, e quando o turno termina em erro. O aviso é curto, diz o nome do projeto e fura a fila, porque existe para interromper. Avisos iguais do mesmo projeto respeitam um intervalo de quinze segundos, para uma sequência de permissões não virar metralhadora. O item Avisar quando precisar de você liga e desliga isso, separado da leitura das respostas. Uma resposta que termina em pergunta também é anunciada como pergunta."),
+  "Além de ler as respostas, o sistema avisa em quatro situações: quando o Claude faz uma pergunta, quando pede permissão para executar algo, quando fica parado esperando você, e quando o turno termina em erro. O aviso é curto, diz o nome do projeto e entra na fila como qualquer fala: espera a atual terminar. Cada situação é avisada uma vez só. O Claude Code repete o pedido de permissão alguns segundos depois, e diz que está esperando um minuto após cada resposta; esses ecos são ignorados, porque a resposta lida já disse de quem era a vez. Um aviso igual que ainda espera na fila não ganha cópia, e avisos iguais do mesmo projeto respeitam quinze segundos de intervalo. O item Avisar quando precisar de você liga e desliga isso, separado da leitura das respostas. Uma resposta que termina em pergunta também é anunciada como pergunta."),
 
  ("Ler qualquer texto, não só as respostas",
   "Quatro caminhos levam ao mesmo lugar. Ler um texto abre uma janela onde você cola ou escreve, com contagem de palavras e estimativa de duração. Ou selecione o texto em qualquer aplicativo e use o botão direito, Serviços, Ler em voz alta. Ou pressione Control, Option, Comando e L com o texto selecionado. Ou copie com Comando C e clique em Ler o que está copiado. Em todos, a leitura fura a fila e o que estava tocando volta para a fila em vez de se perder."),
@@ -206,6 +255,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     var volLabel, spdLabel: NSTextField!
     var volSlider, spdSlider: NSSlider!
     var projSig = ""
+    var abertos: [String: Int]? = nil      // projetos com sessão aberta, relidos a cada 3 s
+    var abertosEm: Double = 0
     var iconeAtual = ""
     var hotKeyRef: EventHotKeyRef?
     var tratadorInstalado = false
@@ -430,16 +481,40 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         queueSig = ""
     }
 
+    /// Sessões abrem e fecham sem avisar ninguém. Reler o registro a cada 3 s basta
+    /// para o menu, sem abrir uma dúzia de arquivos a cada tique de 0,3 s.
+    func abertosAgora(forcar: Bool = false) -> [String: Int]? {
+        let agora = Date().timeIntervalSince1970
+        if forcar || agora - abertosEm >= 3 { abertos = projetosAbertos(); abertosEm = agora }
+        return abertos
+    }
+    func assinaturaProjetos() -> String {
+        let a = abertosAgora().map { $0.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",") }
+        return (a ?? readf(PROJF) ?? "") + "|" + (readf(MUTEDF) ?? "")
+    }
+    func ordenar(_ nomes: [String]) -> [String] {
+        nomes.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// Só os projetos com sessão aberta agora. Um projeto fechado some da lista,
+    /// mas continua silenciado se estava, e volta desmarcado quando for reaberto.
     func rebuildProjects() {
         projMenu.removeAllItems()
         let muted = Set(lines(MUTEDF))
-        let projs = lines(PROJF).sorted()
+        let abertos = abertosAgora()
+        let projs = ordenar(abertos.map { Array($0.keys) } ?? lines(PROJF))
         if projs.isEmpty {
-            let e = NSMenuItem(title: "Nenhum projeto visto ainda", action: nil, keyEquivalent: "")
-            e.isEnabled = false; projMenu.addItem(e); return
+            let e = NSMenuItem(title: abertos == nil ? "Nenhum projeto visto ainda" : "Nenhuma sessão do Claude Code aberta",
+                               action: nil, keyEquivalent: "")
+            e.isEnabled = false; projMenu.addItem(e)
+        } else if abertos != nil {
+            let h = NSMenuItem(title: "Sessões abertas agora", action: nil, keyEquivalent: "")
+            h.isEnabled = false; projMenu.addItem(h)
         }
         for p in projs {
-            let mi = NSMenuItem(title: p, action: #selector(toggleProj(_:)), keyEquivalent: "")
+            let n = abertos?[p] ?? 1
+            let mi = NSMenuItem(title: n > 1 ? "\(p)  ·  \(n) sessões" : p,
+                                action: #selector(toggleProj(_:)), keyEquivalent: "")
             mi.target = self; mi.representedObject = p
             mi.state = muted.contains(p) ? .off : .on
             projMenu.addItem(mi)
@@ -848,7 +923,9 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
 
     @objc func showLabels() {
         if let w = labelsWin { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
-        let projs = lines(PROJF).sorted()
+        // os abertos agora, mais os que já têm legenda, para nenhuma sumir de vista
+        let comLegenda = lines(LABELSF).compactMap { $0.split(separator: "|", maxSplits: 1).first.map(String.init) }
+        let projs = ordenar(abertosAgora(forcar: true).map { Array(Set($0.keys).union(comLegenda)) } ?? lines(PROJF))
         let alturaLista = min(CGFloat(max(projs.count, 1)) * 56 + 8, 336)
         let altura = alturaLista + 148
 
@@ -932,7 +1009,11 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     }
 
     @objc func salvarLegendas() {
-        var linhas: [String] = []
+        // legenda de projeto que não estava na janela fica como estava
+        let naJanela = Set(labelFields.map { $0.0 })
+        var linhas = lines(LABELSF).filter {
+            !naJanela.contains(String($0.split(separator: "|", maxSplits: 1).first ?? ""))
+        }
         for (p, campo) in labelFields {
             let t = campo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if !t.isEmpty { linhas.append("\(p)|\(t)") }
@@ -1324,7 +1405,8 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
                            ts: ts, prio: (d["prio"] ?? "0") == "1", rep: (d["rep"] ?? "1") == "1",
                            pos: Double(d["pos"] ?? "0") ?? 0))
         }
-        return out.sorted { $0.ts < $1.ts }
+        // ordem de chegada; no mesmo segundo, o nome do arquivo desempata de forma estável
+        return out.sorted { $0.ts != $1.ts ? $0.ts < $1.ts : $0.job < $1.job }
     }
 
     func tick() {
@@ -1359,7 +1441,9 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         let now = Date().timeIntervalSince1970
         let muted = Set(lines(MUTEDF))
         // descarta o que envelheceu ou foi silenciado depois de entrar
-        for j in jobs where now - j.ts > MAX_AGE || muted.contains(j.proj) { rm(j.job); rm(j.wav) }
+        for j in jobs where now - j.ts > MAX_AGE || muted.contains(j.proj) {
+            rm(j.job); rm(j.wav); if !j.ann.isEmpty { rm(j.ann) }
+        }
         jobs = jobs.filter { now - $0.ts <= MAX_AGE && !muted.contains($0.proj) }
 
         let mode = readf(MODEF) ?? "fila"
@@ -1371,12 +1455,14 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             player?.stop(); if !nowWav.isEmpty { rm(nowWav); nowWav = "" }; player = nil
         }
         if jobs.count > MAX_QUEUE {
-            for j in jobs.prefix(jobs.count - MAX_QUEUE) { rm(j.job); rm(j.wav) }
+            for j in jobs.prefix(jobs.count - MAX_QUEUE) { rm(j.job); rm(j.wav); if !j.ann.isEmpty { rm(j.ann) } }
             jobs = Array(jobs.suffix(MAX_QUEUE))
         }
         queued = jobs
 
-        // texto selecionado é pedido explícito: fura a fila
+        // Fila indiana: o que chega sozinho, respostas e avisos, espera a fala
+        // atual terminar. Só o texto selecionado fura, porque é pedido explícito
+        // seu, feito na hora; o que estava tocando volta para a fila no ponto exato.
         if !silencio, let urgente = jobs.first(where: { $0.prio }) {
             if player != nil { pularPara(urgente.job) } else { rm(urgente.job); play(urgente) }
             queued = scanQueue().filter { now - $0.ts <= MAX_AGE && !muted.contains($0.proj) }
@@ -1562,7 +1648,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             stateItem.title = espera > 0 ? "Silêncio · \(espera) esperando" : "Silêncio"
             ppItem.title = "Pausar"; ppItem.isEnabled = false
             stopItem.isEnabled = player != nil
-            let sig = (readf(PROJF) ?? "") + "|" + (readf(MUTEDF) ?? "")
+            let sig = assinaturaProjetos()
             if sig != projSig { projSig = sig; rebuildProjects() }
             return
         }
@@ -1591,7 +1677,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
             stateItem.title = isOff ? "Leitura desligada" : "Parado"
             ppItem.title = "Pausar"; ppItem.isEnabled = false; stopItem.isEnabled = false
         }
-        let sig = (readf(PROJF) ?? "") + "|" + (readf(MUTEDF) ?? "")
+        let sig = assinaturaProjetos()
         if sig != projSig { projSig = sig; rebuildProjects() }
         let qsig = queued.map { $0.job }.joined(separator: ",") + "|" + (player != nil ? nowProj : "-")
         if qsig != queueSig { queueSig = qsig; rebuildQueue() }

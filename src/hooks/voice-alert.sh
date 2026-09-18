@@ -6,10 +6,10 @@
 #   atencao    Claude precisa de você (Notification)
 #   erro       o turno terminou em falha (StopFailure)
 #
-# Um aviso fura a fila, como o texto selecionado: ele existe para te
-# interromper. Mas é curto de propósito, e há um intervalo mínimo entre
-# avisos iguais do mesmo projeto, para uma sequência de permissões não
-# virar uma metralhadora.
+# O aviso entra na fila como qualquer outra fala e espera a atual terminar:
+# com várias sessões abertas, interromper no meio de uma resposta confunde
+# mais do que ajuda. Ele é curto de propósito, e o mesmo aviso nunca é dito
+# duas vezes: nem em sequência, nem enquanto um igual ainda espera na fila.
 
 TIPO="${1:-atencao}"
 V="$HOME/.claude/voice"; R="$V/run"; Q="$R/q"; LOG="$HOME/.claude/hooks/speak-response.log"
@@ -21,13 +21,35 @@ export PATH="/usr/bin:/bin:$PATH"
 
 PAYLOAD=$(cat)
 CWD=$(jq -r '.cwd // empty' <<< "$PAYLOAD" 2>/dev/null)
-if [ -n "$CWD" ]; then PROJ=$(basename "$CWD"); else PROJ="claude"; fi
+SESS=$(jq -r '.session_id // empty' <<< "$PAYLOAD" 2>/dev/null)
+NTIPO=$(jq -r '.notification_type // empty' <<< "$PAYLOAD" 2>/dev/null)
+# mesmo nome que a leitura das respostas usa para esta sessão
+if [ -f "$V/projeto.sh" ]; then
+  . "$V/projeto.sh"; projeto_da_sessao "$CWD" claude
+elif [ -n "$CWD" ]; then PROJ=$(basename "$CWD"); else PROJ="claude"; fi
+
+# O Notification do Claude Code é, quase sempre, o eco de algo já avisado.
+# Seis segundos depois de todo pedido de permissão ele manda permission_prompt,
+# e um minuto depois de toda resposta manda idle_prompt. Sem este filtro, cada
+# permissão virava dois avisos e cada resposta lida ganhava um "precisa de você".
+if [ "$TIPO" = atencao ]; then
+  case "$NTIPO" in
+    permission_prompt|elicitation_*|auth_success) exit 0;;
+    # a resposta desta sessão já foi lida, e o anúncio dela já disse o projeto;
+    # só avisa se o turno terminou sem nada para ler ou com a leitura desligada
+    idle_prompt) [ -n "$SESS" ] && [ -f "$R/lida/$SESS" ] && exit 0;;
+  esac
+fi
 
 # projeto silenciado não avisa
 grep -qxF "$PROJ" "$V/muted.txt" 2>/dev/null && exit 0
 
+PK=$(printf '%s' "$PROJ" | tr -c 'A-Za-z0-9' '_')
+# um aviso igual ainda esperando a vez: o segundo não acrescentaria nada
+ls "$Q"/*-alerta-"$TIPO"-"$PK"-*.job >/dev/null 2>&1 && exit 0
+
 # um aviso igual, do mesmo projeto, no máximo a cada 15 segundos
-MARCA="$R/alert/$TIPO-$(printf '%s' "$PROJ" | tr -c 'A-Za-z0-9' '_')"
+MARCA="$R/alert/$TIPO-$PK"
 AGORA=$(date +%s)
 if [ -f "$MARCA" ]; then
   ULT=$(cat "$MARCA" 2>/dev/null || echo 0)
@@ -58,9 +80,10 @@ printf '%s.' "$FRASE" | "$V/synth.sh" "$VOZ" "$WAV" 2>>"$LOG" || exit 0
 
 BAR=$(cat "$R/bar.pid" 2>/dev/null)
 if [ -n "$BAR" ] && kill -0 "$BAR" 2>/dev/null; then
-  # prio=1 fura a fila; sem ann porque o aviso já diz o projeto
-  printf 'wav=%s\nann=\nproj=%s\nsess=\nts=%s\nprio=1\nrep=0\n' "$WAV" "aviso · $NOME" "$AGORA" \
-    > "$Q/$AGORA-alerta-$$.job"
+  # prio=0: espera a vez como as respostas; sem ann porque o aviso já diz o projeto.
+  # O tipo e o projeto no nome do arquivo servem ao teste de repetição acima.
+  printf 'wav=%s\nann=\nproj=%s\nsess=%s\nts=%s\nprio=0\nrep=0\n' "$WAV" "aviso · $NOME" "$SESS" "$AGORA" \
+    > "$Q/$AGORA-alerta-$TIPO-$PK-$$.job"
 else
   afplay -v "$(cat "$V/volume" 2>/dev/null || echo 1)" "$WAV" >/dev/null 2>&1 &
   disown

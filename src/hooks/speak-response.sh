@@ -3,21 +3,34 @@
 # Controles visuais: ícone de alto-falante na barra de menus.
 DIR="$(cd "$(dirname "$0")" && pwd)"
 V="$HOME/.claude/voice"; R="$V/run"; Q="$R/q"; PIDF="$R/play.pid"; LOG="$DIR/speak-response.log"
-mkdir -p "$Q"
+mkdir -p "$Q" "$R/lida"
 
-[ -f "$DIR/voice.off" ] && exit 0
-find "$R" -name 'r-*.wav' -mmin +10 -delete 2>/dev/null
+# áudios órfãos; a folga é bem maior que a espera máxima da fila (10 min)
+find "$R" -maxdepth 1 \( -name 'r-*.wav' -o -name 'a-*.wav' -o -name 'alerta-*.wav' \) \
+  -mmin +30 -delete 2>/dev/null
+find "$R/lida" -type f -mtime +1 -delete 2>/dev/null
 
 PAYLOAD=$(cat)
 echo "$PAYLOAD" > "$R/last-payload.json"          # útil para depurar
+SESS=$(jq -r '.session_id // empty' <<< "$PAYLOAD")
+
+# Marca de "a resposta desta sessão foi lida". O aviso de sessão parada
+# (voice-alert.sh) consulta a marca para não repetir o que a leitura já disse.
+# Some a cada turno e só volta se esta leitura de fato entrar na fila.
+LIDA=""; [ -n "$SESS" ] && { LIDA="$R/lida/$SESS"; rm -f "$LIDA"; }
+
+[ -f "$DIR/voice.off" ] && exit 0
 TRANSCRIPT=$(jq -r '.transcript_path // empty' <<< "$PAYLOAD")
 [ -z "$TRANSCRIPT" ] && exit 0
 [ -f "$TRANSCRIPT" ] || exit 0
 
 CWD=$(jq -r  '.cwd // empty'        <<< "$PAYLOAD")
-SESS=$(jq -r '.session_id // empty' <<< "$PAYLOAD")
-if [ -n "$CWD" ]; then PROJ=$(basename "$CWD"); else PROJ=$(basename "$(dirname "$TRANSCRIPT")"); fi
-[ -z "$PROJ" ] && PROJ="claude"
+# nome estável da sessão: a pasta onde ela foi aberta, ou o worktree
+if [ -f "$V/projeto.sh" ]; then
+  . "$V/projeto.sh"; projeto_da_sessao "$CWD" "$(basename "$(dirname "$TRANSCRIPT")")"
+else
+  PROJ=$(basename "${CWD:-$(dirname "$TRANSCRIPT")}"); [ -z "$PROJ" ] && PROJ="claude"
+fi
 
 # projeto silenciado neste app? sai sem gastar CPU sintetizando
 grep -qxF "$PROJ" "$V/muted.txt" 2>/dev/null && exit 0
@@ -66,9 +79,11 @@ if [ -n "$BAR" ] && kill -0 "$BAR" 2>/dev/null; then
   # entra na fila; o app decide ordem, descarte e reprodução
   JOB="$Q/$STAMP-$$.job"
   printf 'wav=%s\nann=%s\nproj=%s\nsess=%s\nts=%s\n' "$WAV" "$ANN" "$PROJ" "$SESS" "$STAMP" > "$JOB"
+  [ -n "$LIDA" ] && : > "$LIDA"
 else
   # sem app: comportamento simples, a mais nova interrompe
   if [ -f "$PIDF" ]; then P=$(cat "$PIDF"); kill "$P" 2>/dev/null; fi
   afplay -v "$VOL" "$WAV" >/dev/null 2>&1 & echo $! > "$PIDF"; disown
+  [ -n "$LIDA" ] && : > "$LIDA"
 fi
 exit 0

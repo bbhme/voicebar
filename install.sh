@@ -51,7 +51,8 @@ ok "Python padrão $($PY3 -V 2>&1 | cut -d' ' -f2)"
 step "2/9  Copiando os scripts"
 mkdir -p "$V/models" "$V/kokoro" "$V/run/q" "$H"
 cp "$SRC/VoiceBar.swift" "$SRC/voice" "$SRC/synth.sh" "$SRC/speak.py" \
-   "$SRC/speak_kokoro.py" "$SRC/read-selection.sh" "$SRC/summarize.sh" "$SRC/voices.txt" "$V/"
+   "$SRC/speak_kokoro.py" "$SRC/read-selection.sh" "$SRC/summarize.sh" "$SRC/projeto.sh" \
+   "$SRC/voices.txt" "$V/"
 chmod +x "$V/voice" "$V/synth.sh" "$V/speak.py" "$V/speak_kokoro.py" \
          "$V/read-selection.sh" "$V/summarize.sh"
 mkdir -p "$V/lang"
