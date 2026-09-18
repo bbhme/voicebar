@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
-"""Extrai a última resposta de texto do assistente de uma transcrição JSONL do Claude Code
-e imprime uma versão limpa para o `say`."""
+"""Limpa a última resposta do assistente para ser falada.
+
+Uso:  speak-response.py <transcript.jsonl> <max>   extrai do transcript
+      speak-response.py - <max>                    lê a resposta pronta da entrada
+"""
 import json, re, sys
 
 path, max_chars = sys.argv[1], int(sys.argv[2])
 last = None
-with open(path, encoding="utf-8", errors="ignore") as f:
-    for line in f:
-        try:
-            o = json.loads(line)
-        except Exception:
-            continue
-        if o.get("type") != "assistant":
-            continue
-        content = (o.get("message") or {}).get("content") or []
-        if isinstance(content, str):
-            parts = [content]
-        else:
-            parts = [c.get("text", "") for c in content
-                     if isinstance(c, dict) and c.get("type") == "text"]
-        t = "\n".join(p for p in parts if p).strip()
-        if t:
-            last = t
+if path == "-":
+    last = sys.stdin.read().strip() or None
+else:
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            if o.get("type") != "assistant":
+                continue
+            content = (o.get("message") or {}).get("content") or []
+            if isinstance(content, str):
+                parts = [content]
+            else:
+                parts = [c.get("text", "") for c in content
+                         if isinstance(c, dict) and c.get("type") == "text"]
+            t = "\n".join(p for p in parts if p).strip()
+            if t:
+                last = t
 if not last:
     sys.exit(0)
 

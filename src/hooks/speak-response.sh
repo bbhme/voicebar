@@ -21,8 +21,15 @@ LIDA=""; [ -n "$SESS" ] && { LIDA="$R/lida/$SESS"; rm -f "$LIDA"; }
 
 [ -f "$DIR/voice.off" ] && exit 0
 TRANSCRIPT=$(jq -r '.transcript_path // empty' <<< "$PAYLOAD")
-[ -z "$TRANSCRIPT" ] && exit 0
-[ -f "$TRANSCRIPT" ] || exit 0
+# A resposta vem pronta no próprio evento, em last_assistant_message. Ler do
+# transcript era uma corrida: o Claude Code termina de gravar a última mensagem
+# no arquivo milissegundos depois de chamar o gancho, e a leitura pegava a
+# resposta anterior. O transcript fica só para versões que não mandam o campo.
+if jq -e 'has("last_assistant_message")' <<< "$PAYLOAD" >/dev/null 2>&1; then
+  PRONTA=1
+else
+  PRONTA=0; [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
+fi
 
 CWD=$(jq -r  '.cwd // empty'        <<< "$PAYLOAD")
 # nome estável da sessão: a pasta onde ela foi aberta, ou o worktree
@@ -37,7 +44,15 @@ grep -qxF "$PROJ" "$V/muted.txt" 2>/dev/null && exit 0
 # registra o projeto para aparecer no menu
 grep -qxF "$PROJ" "$V/projects.txt" 2>/dev/null || echo "$PROJ" >> "$V/projects.txt"
 
-TEXT=$(python3 "$DIR/speak-response.py" "$TRANSCRIPT" "${CLAUDE_SAY_MAX_CHARS:-0}")
+if [ "$PRONTA" = 1 ]; then
+  # campo presente mas vazio: o turno terminou sem texto, e não há o que falar;
+  # cair no transcript aqui traria de volta a resposta anterior
+  TEXT=$(jq -r '.last_assistant_message // empty' <<< "$PAYLOAD" \
+         | python3 "$DIR/speak-response.py" - "${CLAUDE_SAY_MAX_CHARS:-0}")
+else
+  sleep 1   # sem o campo, dá tempo ao Claude Code de terminar de gravar o transcript
+  TEXT=$(python3 "$DIR/speak-response.py" "$TRANSCRIPT" "${CLAUDE_SAY_MAX_CHARS:-0}")
+fi
 [ -z "$TEXT" ] && exit 0
 
 # resume antes de anunciar, para o nome do projeto não entrar no resumo

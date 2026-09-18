@@ -3,3 +3,4 @@
 *.wav
 *.onnx
 *.bin
+__pycache__/

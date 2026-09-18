@@ -128,6 +128,18 @@ rm -f "$FV/run/alert/"*
 ev s3 "" | HOME="$FH" "$FHK/voice-alert.sh" permissao
 [ "$(fila)" = 2 ] && ok "aviso igual esperando na fila não é duplicado" || nao "aviso duplicado na fila ($(fila))"
 grep -qx 'prio=0' "$FQ"/*-alerta-*.job 2>/dev/null && ok "aviso espera a vez, sem furar a fila" || nao "aviso fura a fila"
+
+step "8  Fala a resposta certa, não a anterior"
+# O transcript é gravado depois do gancho; a resposta tem de vir do evento.
+ANTES=$(fila)
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Resposta anterior."}]}}' > "$TMP/t2.jsonl"
+printf '{"session_id":"s5","cwd":"/x/teste","transcript_path":"%s","last_assistant_message":""}' "$TMP/t2.jsonl" \
+  | HOME="$FH" "$FHK/speak-response.sh"
+[ "$(fila)" = "$ANTES" ] && ok "turno sem texto não repete a resposta anterior" || nao "turno sem texto falou a resposta anterior"
+: > "$TMP/t3.jsonl"
+printf '{"session_id":"s6","cwd":"/x/teste","transcript_path":"%s","last_assistant_message":"Resposta nova."}' "$TMP/t3.jsonl" \
+  | HOME="$FH" "$FHK/speak-response.sh"
+[ "$(fila)" = $((ANTES + 1)) ] && ok "a resposta vem do evento, mesmo com o transcript ainda sem ela" || nao "a resposta do evento não foi falada"
 kill "$FALSO" 2>/dev/null; wait "$FALSO" 2>/dev/null
 
 step "Resultado"
