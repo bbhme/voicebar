@@ -2,7 +2,7 @@
 # Hook Stop: enfileira a leitura da resposta, identificada pelo projeto de origem.
 # Controles visuais: ícone de alto-falante na barra de menus.
 DIR="$(cd "$(dirname "$0")" && pwd)"
-V="$HOME/.claude/voice"; R="$V/run"; Q="$R/q"; PIDF="$R/play.pid"; LOG="$DIR/speak-response.log"
+V="$HOME/.claude/voice"; R="$V/run"; Q="$R/q"; LOG="$DIR/speak-response.log"
 mkdir -p "$Q" "$R/lida"
 
 # áudios órfãos; a folga é bem maior que a espera máxima da fila (10 min)
@@ -20,6 +20,11 @@ SESS=$(jq -r '.session_id // empty' <<< "$PAYLOAD")
 LIDA=""; [ -n "$SESS" ] && { LIDA="$R/lida/$SESS"; rm -f "$LIDA"; }
 
 [ -f "$DIR/voice.off" ] && exit 0
+# Com o app fechado, nada é falado. Sair do VoiceBar é para silenciar de
+# verdade; antes a resposta era tocada assim mesmo, sem fila e sem controles,
+# e o ícone sumia da barra enquanto a voz continuava.
+BAR=$(cat "$R/bar.pid" 2>/dev/null)
+{ [ -n "$BAR" ] && kill -0 "$BAR" 2>/dev/null; } || exit 0
 TRANSCRIPT=$(jq -r '.transcript_path // empty' <<< "$PAYLOAD")
 # A resposta vem pronta no próprio evento, em last_assistant_message. Ler do
 # transcript era uma corrida: o Claude Code termina de gravar a última mensagem
@@ -60,7 +65,6 @@ SUM=$(printf '%s' "$TEXT" | "$V/summarize.sh" 2>/dev/null)
 [ -n "$SUM" ] && TEXT="$SUM"
 
 VOZ=$(cat "$V/current" 2>/dev/null || echo cadu)
-VOL=$(cat "$V/volume"  2>/dev/null || echo 1.0)
 STAMP=$(date +%s)
 WAV="$R/r-$$-$STAMP.wav"
 
@@ -89,16 +93,8 @@ if [ "$(cat "$V/announce" 2>/dev/null || echo 1)" = "1" ]; then
   [ -s "$ANN" ] || ANN=""
 fi
 
-BAR=$(cat "$R/bar.pid" 2>/dev/null)
-if [ -n "$BAR" ] && kill -0 "$BAR" 2>/dev/null; then
-  # entra na fila; o app decide ordem, descarte e reprodução
-  JOB="$Q/$STAMP-$$.job"
-  printf 'wav=%s\nann=%s\nproj=%s\nsess=%s\nts=%s\n' "$WAV" "$ANN" "$PROJ" "$SESS" "$STAMP" > "$JOB"
-  [ -n "$LIDA" ] && : > "$LIDA"
-else
-  # sem app: comportamento simples, a mais nova interrompe
-  if [ -f "$PIDF" ]; then P=$(cat "$PIDF"); kill "$P" 2>/dev/null; fi
-  afplay -v "$VOL" "$WAV" >/dev/null 2>&1 & echo $! > "$PIDF"; disown
-  [ -n "$LIDA" ] && : > "$LIDA"
-fi
+# entra na fila; o app decide ordem, descarte e reprodução
+JOB="$Q/$STAMP-$$.job"
+printf 'wav=%s\nann=%s\nproj=%s\nsess=%s\nts=%s\n' "$WAV" "$ANN" "$PROJ" "$SESS" "$STAMP" > "$JOB"
+[ -n "$LIDA" ] && : > "$LIDA"
 exit 0

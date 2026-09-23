@@ -142,6 +142,17 @@ printf '{"session_id":"s6","cwd":"/x/teste","transcript_path":"%s","last_assista
 [ "$(fila)" = $((ANTES + 1)) ] && ok "a resposta vem do evento, mesmo com o transcript ainda sem ela" || nao "a resposta do evento não foi falada"
 kill "$FALSO" 2>/dev/null; wait "$FALSO" 2>/dev/null
 
+step "9  Com o app fechado, nada é falado"
+# o bar.pid continua lá, apontando para um processo que já morreu: é o estado
+# exato de quando você escolhe Sair e o ícone some da barra
+ANTES=$(fila); AUDIOS=$(ls "$FV/run"/*.wav 2>/dev/null | wc -l | tr -d ' ')
+printf '{"session_id":"s7","cwd":"/x/teste","last_assistant_message":"Resposta qualquer."}' \
+  | HOME="$FH" "$FHK/speak-response.sh"
+ev s7 "" | HOME="$FH" "$FHK/voice-alert.sh" permissao
+[ "$(fila)" = "$ANTES" ] && ok "resposta e aviso são descartados com o app fechado" || nao "falou com o app fechado"
+[ "$(ls "$FV/run"/*.wav 2>/dev/null | wc -l | tr -d ' ')" = "$AUDIOS" ] \
+  && ok "nem sintetiza: sai antes de gastar CPU" || nao "sintetizou áudio à toa com o app fechado"
+
 step "Resultado"
 if [ "$FALHAS" -eq 0 ]; then
   printf "  \033[32mtudo certo\033[0m\n\n"; exit 0

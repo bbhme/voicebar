@@ -18,6 +18,9 @@ export PATH="/usr/bin:/bin:$PATH"
 
 # interruptor próprio: avisar é independente de ler as respostas
 [ "$(cat "$V/alerts" 2>/dev/null || echo 1)" = "1" ] || exit 0
+# app fechado, ninguém fala: é o que Sair significa
+BAR=$(cat "$R/bar.pid" 2>/dev/null)
+{ [ -n "$BAR" ] && kill -0 "$BAR" 2>/dev/null; } || exit 0
 
 PAYLOAD=$(cat)
 CWD=$(jq -r '.cwd // empty' <<< "$PAYLOAD" 2>/dev/null)
@@ -78,15 +81,9 @@ WAV="$R/alerta-$$-$AGORA.wav"
 printf '%s.' "$FRASE" | "$V/synth.sh" "$VOZ" "$WAV" 2>>"$LOG" || exit 0
 [ -s "$WAV" ] || exit 0
 
-BAR=$(cat "$R/bar.pid" 2>/dev/null)
-if [ -n "$BAR" ] && kill -0 "$BAR" 2>/dev/null; then
-  # prio=0: espera a vez como as respostas; sem ann porque o aviso já diz o projeto.
-  # O tipo e o projeto no nome do arquivo servem ao teste de repetição acima.
-  printf 'wav=%s\nann=\nproj=%s\nsess=%s\nts=%s\nprio=0\nrep=0\n' "$WAV" "aviso · $NOME" "$SESS" "$AGORA" \
-    > "$Q/$AGORA-alerta-$TIPO-$PK-$$.job"
-else
-  afplay -v "$(cat "$V/volume" 2>/dev/null || echo 1)" "$WAV" >/dev/null 2>&1 &
-  disown
-fi
+# prio=0: espera a vez como as respostas; sem ann porque o aviso já diz o projeto.
+# O tipo e o projeto no nome do arquivo servem ao teste de repetição acima.
+printf 'wav=%s\nann=\nproj=%s\nsess=%s\nts=%s\nprio=0\nrep=0\n' "$WAV" "aviso · $NOME" "$SESS" "$AGORA" \
+  > "$Q/$AGORA-alerta-$TIPO-$PK-$$.job"
 echo "$(date '+%F %T') aviso [$TIPO] $NOME" >> "$LOG"
 exit 0

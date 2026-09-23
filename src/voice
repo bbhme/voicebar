@@ -162,8 +162,10 @@ case "${1:-status}" in
           [ -n "$b" ] && echo "reiniciado (pid $b)" || echo "nao consegui reiniciar";;
   silencio|mudo) [ -n "$(bar)" ] && { send silencio; echo "silêncio alternado"; exit 0; }
           echo "app da barra nao esta rodando";;
-  quit|sair) [ -n "$(bar)" ] && { send quit; sleep 1; echo "app encerrado"; } || echo "ja estava fechado";;
-  status) [ -n "$(bar)" ] && echo "estado : $(cat $R/../current >/dev/null; echo controlado pelo app da barra)" || echo "estado : $(st)"
+  quit|sair) [ -n "$(bar)" ] && { send quit; sleep 1; echo "app encerrado; nada mais sera falado ate voice bar"; } \
+             || echo "ja estava fechado; nada esta sendo falado";;
+  status) [ -n "$(bar)" ] && echo "estado : controlado pelo app da barra" \
+            || echo "estado : APP FECHADO, nada e falado; abra com voice bar"
           echo "voz    : $(cat $V/current 2>/dev/null)"
           echo "volume : $(cat $V/volume 2>/dev/null)"
           echo "veloc. : $(cat $V/speed 2>/dev/null || echo 1.0)x"

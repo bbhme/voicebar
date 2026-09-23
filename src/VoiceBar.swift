@@ -171,10 +171,10 @@ let AJUDA: [(String, String)] = [
   "Marcando Resumir antes de ler, dois campos ao lado passam a valer. O menu de tamanho deixa você usar uma redução diferente da global só nesta leitura, e o campo de instrução aceita um pedido diferente do global, também só desta vez. Deixando o menu em Tamanho do ajuste global e o campo em branco, ele usa exatamente o que está configurado em Resumo por IA. Nada do que você escolher aqui altera os ajustes globais. Marcar esta opção também resume mesmo que o resumo esteja desligado no menu, porque foi um pedido explícito seu."),
 
  ("Desligar, sair e voltar",
-  "Ler as respostas desmarcado silencia as respostas do Claude Code, mas você continua podendo mandar ler um texto. Sair fecha o app: a leitura das respostas continua funcionando, só que sem controles, sem fila e sem anúncio."),
+  "Ler as respostas desmarcado silencia as respostas do Claude Code, mas você continua podendo mandar ler um texto. Sair fecha o app e silencia tudo: sem o app na barra, nem as respostas nem os avisos são falados, porque é ele quem toca. Para voltar, use Ler em voz alta no menu de Serviços ou o comando voice bar."),
 
  ("Se o app cair ou travar",
-  "Se ele cair sozinho, volta em cerca de três segundos: o sistema o vigia e o reinicia, mas só quando a saída foi anormal. Quando você escolhe Sair, ele fica fechado, como deve. O item Reiniciar o app derruba e sobe de novo na hora, útil depois de qualquer coisa estranha; a fila sobrevive, porque ela são arquivos em disco, e só a fala que estava tocando se perde. Se ele travar a ponto de o menu não abrir, o mesmo efeito vem de voice restart no terminal. Para abrir depois de ter saído, use voice bar. E ele sempre volta sozinho quando você faz login."),
+  "Se ele cair sozinho, volta em cerca de três segundos: o sistema o vigia e o reinicia, mas só quando a saída foi anormal. Quando você escolhe Sair, ele fica fechado, como deve, e nada é falado enquanto isso. O item Reiniciar o app derruba e sobe de novo na hora, útil depois de qualquer coisa estranha; a fila sobrevive, porque ela são arquivos em disco, e só a fala que estava tocando se perde. Se ele travar a ponto de o menu não abrir, o mesmo efeito vem de voice restart no terminal. Para abrir depois de ter saído, use voice bar. E ele sempre volta sozinho quando você faz login."),
 
  ("Tudo isso também funciona no terminal",
   "Pelo comando voice.  Reprodução: pause, resume, toggle, skip, stop, clear.  Ajustes: vol, speed, use, list.  Fila: fila, pick, mode, mute, unmute, projetos.  Extras: pausa, announce, resumo, say, status.  Sem argumento, cada um mostra o valor atual."),
@@ -424,7 +424,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         m.addItem(.separator())
         let rei = NSMenuItem(title: "Reiniciar o app", action: #selector(reiniciar), keyEquivalent: "r")
         rei.target = self; m.addItem(rei)
-        let q = NSMenuItem(title: "Sair", action: #selector(quit), keyEquivalent: "q"); q.target = self; m.addItem(q)
+        let q = NSMenuItem(title: "Sair e silenciar tudo", action: #selector(quit), keyEquivalent: "q"); q.target = self; m.addItem(q)
         item.menu = m
         rebuildVoices(); rebuildProjects(); rebuildMode(); rebuildPause(); rebuildHotkey(); mostrarAtalhoNoMenu(); rebuildQueue(); refreshMenu()
     }

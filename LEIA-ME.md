@@ -221,7 +221,7 @@ Erros ficam registrados em `~/.claude/hooks/speak-response.log`.
 | Situação | O que acontece |
 |---|---|
 | O app caiu sozinho | volta em cerca de três segundos, sem você fazer nada |
-| Você escolheu **Sair** | fica fechado; use `voice bar` para abrir |
+| Você escolheu **Sair e silenciar tudo** | fica fechado e nada é falado; use `voice bar` para abrir |
 | Alguma coisa estranha | menu, **Reiniciar o app** |
 | O menu nem abre | `voice restart` no terminal |
 | Você reiniciou o Mac | volta sozinho no login |
@@ -229,11 +229,17 @@ Erros ficam registrados em `~/.claude/hooks/speak-response.log`.
 O sistema vigia o app e o reinicia **apenas quando a saída foi anormal**. Se você
 escolheu Sair, ele respeita a sua decisão e não insiste.
 
+**Com o app fechado, nada é falado.** É ele quem toca o áudio, guarda a fila e
+anuncia o projeto. Sem ele na barra, as respostas e os avisos são descartados
+em silêncio, e mandar ler um texto selecionado mostra um aviso na tela em vez de
+falar. Isso é o que faz o Sair valer de verdade: antes, o ícone sumia da barra e
+a voz continuava.
+
 Travamento é o único caso que o vigia não cobre, porque o processo não morreu,
 só parou de responder. O `voice restart` derruba o travado e sobe um novo.
 
-Se a fala parar, rode `voice status`. Ele mostra se o gatilho está ligado, qual
-voz está ativa e quantas falas estão na fila.
+Se a fala parar, rode `voice status`. Ele diz se o app está fechado, se o gatilho
+está ligado, qual voz está ativa e quantas falas estão na fila.
 
 Rode `./test.sh` para uma checagem completa da instalação. Ele confere os
 pré-requisitos, sintetiza com os dois motores, exercita a fila e verifica que a
