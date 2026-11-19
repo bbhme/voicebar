@@ -4,27 +4,130 @@ V="$HOME/.claude/voice"; R="$V/run"; PIDF="$R/play.pid"; OFF="$HOME/.claude/hook
 mkdir -p "$R"
 bar(){ b=$(cat "$R/bar.pid" 2>/dev/null); [ -n "$b" ] && kill -0 "$b" 2>/dev/null && echo "$b"; }
 send(){ echo "$*" > "$R/cmd"; }
-# Nome de cada sessão do Claude Code aberta agora, um por linha (repete se houver
-# várias no mesmo projeto). Mesma regra do menu Projetos que falam.
-abertos(){
-  local f pid ini ms cwd nome
+# Uma linha por sessão do Claude Code aberta agora, com quatro campos separados
+# por SEP: pid, id da sessão, nome que o Claude Code deu a ela e o nome que ela
+# fala. O nome falado segue a regra do menu Projetos que falam.
+SEP=$'\x1f'
+sessoes(){
+  local f pid ini ms sid cnome cwd nome
   for f in "$HOME/.claude/sessions"/*.json; do
     [ -f "$f" ] || continue
     pid=$(basename "$f" .json); kill -0 "$pid" 2>/dev/null || continue
     ini=$(TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" | sed 's/ *$//')
     ini=$(LC_ALL=C date -j -u -f "%a %b %e %T %Y" "$ini" +%s 2>/dev/null) || continue
+    ms=0; sid=""; cnome=""; cwd=""
+    IFS="$SEP" read -r ms sid cnome cwd < <(jq -r --arg s "$SEP" \
+      '[(.startedAt // 0 | tostring), .sessionId // "", .name // "", .cwd // ""] | join($s)' "$f" 2>/dev/null)
     # registro que sobrou de uma sessão que caiu, com o PID reaproveitado
-    ms=$(jq -r '.startedAt // 0' "$f" 2>/dev/null)
-    [ "$ms" != 0 ] && [ "$ini" -gt $(( ms / 1000 + 5 )) ] && continue
+    [ "${ms:-0}" != 0 ] && [ "$ini" -gt $(( ms / 1000 + 5 )) ] && continue
     nome=""
     [ -f "$R/sessoes/$pid" ] && [ "$(stat -f %m "$R/sessoes/$pid")" -ge "$ini" ] && nome=$(cat "$R/sessoes/$pid")
-    if [ -z "$nome" ]; then
-      cwd=$(jq -r '.cwd // empty' "$f" 2>/dev/null)
+    if [ -z "$nome" ] && [ -n "$cwd" ]; then
       case "$cwd" in */.claude/worktrees/*) nome=${cwd#*/.claude/worktrees/}; nome=${nome%%/*};;
                      *) nome=$(basename "$cwd");; esac
     fi
-    [ -n "$nome" ] && echo "$nome"
+    [ -n "$nome" ] && printf '%s\n' "$pid$SEP$sid$SEP$cnome$SEP$nome"
   done
+}
+# Nome de cada sessão aberta agora, um por linha (repete se houver várias no mesmo projeto).
+abertos(){ sessoes | cut -d"$SEP" -f4; }
+
+# Põe um texto na fila como fala de uma sessão: o mesmo anúncio, a mesma legenda,
+# o mesmo silenciamento e a mesma fila das respostas do Claude Code. É a porta
+# de entrada para outros aplicativos. Saída: 0 na fila, 1 uso errado, 2 app
+# fechado, 3 síntese falhou, 4 sessão silenciada, 5 sessão não está aberta.
+falar(){
+  local alvo="" origem="" agora=0 anuncia=1 resume=1 simula=0 texto=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --sessao|--sessão|-s|--origem|-o)
+        [ $# -ge 2 ] || { echo "falta o valor de $1" >&2; return 1; }
+        case "$1" in --origem|-o) origem="$2";; *) alvo="$2";; esac; shift 2;;
+      --agora)       agora=1; shift;;
+      --sem-anuncio|--sem-anúncio) anuncia=0; shift;;
+      --sem-resumo)  resume=0; shift;;
+      --simular)     simula=1; shift;;
+      --) shift; break;;
+      -*) echo "opção desconhecida: $1" >&2; return 1;;
+      *)  break;;
+    esac
+  done
+  if [ $# -gt 0 ]; then texto="$*"; elif [ ! -t 0 ]; then texto=$(tr -d '\000'); fi
+  texto=$(printf '%s' "$texto" | LC_ALL=C tr '\n\r\t' '   ' | LC_ALL=C sed 's/  */ /g; s/^ //; s/ $//')
+  texto=${texto:0:20000}
+  [ -z "$texto" ] && { echo "uso: voice falar [--sessao <id|pid|nome>] [--agora] \"texto\"" >&2; return 1; }
+
+  # a sessão pode vir pelo id, pelo pid ou pelo nome que o Claude Code deu a ela;
+  # fora isso, o valor vale como nome de projeto, o mesmo de voice mute e legenda
+  local proj="mensagem" sess="" cnome="" p s c n
+  if [ -n "$alvo" ]; then
+    proj=""
+    while IFS="$SEP" read -r p s c n; do
+      [ -n "$p" ] || continue
+      if [ "$alvo" = "$p" ] || [ "$alvo" = "$s" ] || [ "$alvo" = "$c" ]; then
+        proj="$n"; sess="$s"; cnome="$c"; break
+      fi
+    done <<< "$(sessoes)"
+    if [ -z "$proj" ]; then
+      if printf '%s' "$alvo" | grep -Eqi '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+        echo "a sessão $alvo não está aberta" >&2; return 5
+      fi
+      proj="$alvo"
+    fi
+  fi
+  # uma quebra de linha no nome viraria um campo a mais no pedido da fila
+  proj=$(printf '%s' "$proj" | LC_ALL=C tr -d '\000-\037')
+  origem=$(printf '%s' "$origem" | LC_ALL=C tr -d '\000-\037')
+
+  # app fechado, ninguém fala: é o que Sair significa
+  if [ "$simula" = 0 ] && [ -z "$(bar)" ]; then
+    echo "o VoiceBar está fechado; abra com voice bar" >&2; return 2
+  fi
+  # silenciado antes de gastar CPU sintetizando, como nos ganchos
+  if grep -qxF "$proj" "$V/muted.txt" 2>/dev/null; then
+    echo "$proj está silenciado; nada foi falado" >&2; return 4
+  fi
+
+  local nome="$origem"
+  if [ -z "$nome" ]; then
+    nome=$(awk -F'|' -v p="$proj" '$1 == p { sub(/^[^|]*\|/, ""); print; exit }' "$V/labels.txt" 2>/dev/null)
+    [ -z "$nome" ] && nome=$(printf '%s' "$proj" | tr '_.-' '   ' | sed 's/  */ /g; s/^ //; s/ $//')
+  fi
+
+  if [ "$resume" = 1 ]; then
+    local sum; sum=$(printf '%s' "$texto" | "$V/summarize.sh" 2>/dev/null)
+    [ -n "$sum" ] && texto="$sum"
+  fi
+
+  local log="$HOME/.claude/hooks/speak-response.log" voz stamp wav ann=""
+  voz=$(cat "$V/current" 2>/dev/null || echo cadu)
+  stamp=$(date +%s); wav="$R/r-ext-$$-$stamp.wav"
+  mkdir -p "$R/q"
+  if ! printf '%s' "$texto" | "$V/synth.sh" "$voz" "$wav" 2>>"$log"; then
+    echo "$(date '+%F %T') falar: sintese falhou ($voz)" >> "$log"
+    rm -f "$wav"; echo "não consegui gerar o áudio" >&2; return 3
+  fi
+  if [ "$anuncia" = 1 ] && [ "$(cat "$V/announce" 2>/dev/null || echo 1)" = 1 ]; then
+    ann="$R/a-ext-$$-$stamp.wav"
+    printf '%s.' "$nome" | "$V/synth.sh" "$voz" "$ann" 2>>"$log" || ann=""
+    { [ -n "$ann" ] && [ -s "$ann" ]; } || ann=""
+  fi
+
+  # prio=1 fura a fila como o texto selecionado; prio=0 espera a vez
+  local pedido; pedido=$(printf 'wav=%s\nann=%s\nproj=%s\nsess=%s\nts=%s\nprio=%s' \
+                           "$wav" "$ann" "$proj" "$sess" "$stamp" "$agora")
+  if [ "$simula" = 1 ]; then
+    echo "simulação, nada entrou na fila"
+    if [ -n "$ann" ]; then echo "  anúncio: \"$nome\""; else echo "  anúncio: nenhum"; fi
+    printf '%s\n' "$pedido" | sed 's/^/  /'
+    rm -f "$wav" "$ann"; return 0
+  fi
+  # grava ao lado e renomeia: o app nunca lê um pedido pela metade
+  local job="$R/q/$stamp-ext-$$.job"
+  printf '%s\n' "$pedido" > "$job.tmp" && mv "$job.tmp" "$job"
+  echo "na fila: $nome${cnome:+ (sessão $cnome)}"
+  [ "$(cat "$R/silencio" 2>/dev/null)" = 1 ] && echo "silêncio ligado: a fala espera até ele ser desligado"
+  return 0
 }
 pid(){ [ -f "$PIDF" ] && p=$(cat "$PIDF" 2>/dev/null) && kill -0 "$p" 2>/dev/null && echo "$p"; }
 st(){ p=$(pid); [ -z "$p" ] && { echo parado; return; }
@@ -143,6 +246,13 @@ case "${1:-status}" in
           echo "$v" > "$V/current"; echo "voz agora: $v";;
   list)   echo "vozes disponíveis:"; awk -F'|' '{printf "  %-10s %s\n",$1,$4}' "$V/voices.txt"
           echo "atual: $(cat $V/current 2>/dev/null)";;
+  falar|speak) shift; falar "$@"; exit $?;;
+  sessoes|sessões|sessions)
+          L=$(sessoes); [ -z "$L" ] && { echo "nenhuma sessão do Claude Code aberta"; exit 0; }
+          echo "sessões abertas agora (qualquer coluna menos PROJETO serve no voice falar --sessao):"
+          printf "  %-7s %-36s %-28s %s\n" PID ID NOME PROJETO
+          printf '%s\n' "$L" | sort -t"$SEP" -k4,4f -k3,3f | while IFS="$SEP" read -r p s c n; do
+            printf "  %-7s %-36s %-28s %s\n" "$p" "$s" "$c" "$n"; done;;
   say)    shift; t="$*"; [ -z "$t" ] && { echo "uso: voice say \"texto\""; exit 1; }
           "$V/synth.sh" "$(cat $V/current)" "$R/say.wav" <<< "$t" || exit 1
           afplay -v "$(cat $V/volume 2>/dev/null || echo 1)" "$R/say.wav";;
@@ -213,6 +323,19 @@ case "${1:-status}" in
      echo "  resumo min <n>               não resumir abaixo de n palavras"
      echo "  resumo modelo <nome>         escolhe o modelo"
      echo "  resumo modelos               lista os modelos buscados"
+     echo
+     echo "OUTROS APLICATIVOS"
+     echo "  falar [opções] <texto>       põe um texto na fila como fala de uma sessão"
+     echo "    --sessao <alvo>            id, pid ou nome da sessão no Claude Code,"
+     echo "                               ou o nome de um projeto (padrão: mensagem)"
+     echo "    --origem <nome>            o que o anúncio diz (padrão: legenda do projeto)"
+     echo "    --agora                    fura a fila, como o texto selecionado"
+     echo "    --sem-anuncio              não fala a origem antes"
+     echo "    --sem-resumo               nunca resume, mesmo com o resumo ligado"
+     echo "    --simular                  gera o áudio e mostra o pedido, sem falar"
+     echo "    o texto também pode vir pela entrada padrão. Saída: 0 na fila,"
+     echo "    2 app fechado, 3 síntese falhou, 4 silenciado, 5 sessão fechada"
+     echo "  sessoes                      sessões abertas, com pid, id, nome e projeto"
      echo
      echo "GERAL"
      echo "  on | off                     liga e desliga a leitura das respostas"

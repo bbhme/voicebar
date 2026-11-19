@@ -132,6 +132,40 @@ que são o primeiro e o quarto, funcionam na hora.
 
 ---
 
+## Falar a partir de outro aplicativo
+
+Qualquer programa do Mac que consiga rodar um comando pode pôr uma fala na
+fila em nome de uma sessão do Claude Code. Ela é tratada como uma resposta
+daquela sessão: o anúncio diz a legenda do projeto, um projeto silenciado não
+fala, e a fala espera a vez na fila.
+
+```bash
+voice falar --sessao 1b2c3d4e-0000-4000-8000-123456789abc "Os testes passaram."
+voice falar --sessao meu-app --agora "Deploy concluído."   # fura a fila
+echo "texto longo" | voice falar --sessao meu-app-8c       # o texto pela entrada padrão
+voice sessoes                                              # quem está aberto, e com que id
+```
+
+A sessão pode ser indicada pelo id, pelo pid ou pelo nome que o Claude Code deu
+a ela. Qualquer outro valor vale como nome de projeto, o mesmo usado por
+`voice mute` e `voice legenda`. Outras opções: `--origem` troca o que o anúncio
+diz, `--sem-anuncio`, `--sem-resumo`, e `--simular` gera o áudio e mostra o
+pedido sem falar.
+
+O comando só volta depois de gerar o áudio, de 1 a 5 segundos, e o código de
+saída diz o que aconteceu: 0 entrou na fila, 1 uso errado, 2 o VoiceBar está
+fechado, 3 a síntese falhou, 4 o projeto está silenciado, 5 a sessão não está
+aberta. De um app em Swift, por exemplo:
+
+```swift
+let p = Process()
+p.executableURL = URL(fileURLWithPath: NSHomeDirectory() + "/.claude/voice/voice")
+p.arguments = ["falar", "--sessao", sessionId, texto]
+try p.run()   // sem waitUntilExit, o app não espera a síntese
+```
+
+---
+
 ## Avisos quando o Claude Code precisa de você
 
 Além de ler as respostas, o sistema avisa em quatro situações:
