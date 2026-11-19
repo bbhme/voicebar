@@ -35,6 +35,7 @@ let LABELSF = VDIR + "/labels.txt"
 // Os limites dão folga para isso sem acumular respostas que já perderam o sentido.
 let MAX_AGE: Double = 600     // descarta fala com mais de 10 min de espera
 let MAX_QUEUE = 10            // guarda no máximo 10 na fila
+let MAX_TITULO = 24           // caracteres do nome mostrado ao lado do ícone
 
 func readf(_ p: String) -> String? {
     guard let s = try? String(contentsOfFile: p, encoding: .utf8) else { return nil }
@@ -111,7 +112,7 @@ let AJUDA: [(String, String)] = [
   "Ele lê em voz alta a resposta final de cada sessão do Claude Code, e também qualquer texto que você mandar. Todo o áudio é gerado aqui no seu Mac, sem internet, sem conta e sem limite de uso. Os controles vivem no ícone de alto-falante da barra de menus, no canto superior direito da tela."),
 
  ("O ícone mostra o estado sem você abrir nada",
-  "Alto-falante normal: parado.  Alto-falante cheio: lendo.  Onda menor: num silêncio entre partes.  Símbolo de pausa: você pausou.  Alto-falante riscado: a leitura das respostas está desligada."),
+  "Alto-falante normal: parado.  Alto-falante cheio: lendo.  Onda menor: num silêncio entre partes.  Símbolo de pausa: você pausou.  Alto-falante riscado: a leitura das respostas está desligada.  Enquanto uma fala acontece, o nome do projeto que está falando aparece ao lado do ícone, e some quando ela termina."),
 
  ("As duas primeiras linhas do menu",
   "A primeira diz o que acontece agora: Anunciando com o nome do projeto, Pausa durante os silêncios, Lendo com o tempo que ainda falta, ou Parado. A segunda só aparece quando há espera, e mostra quantas falas estão na fila e de quais projetos."),
@@ -258,6 +259,7 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
     var abertos: [String: Int]? = nil      // projetos com sessão aberta, relidos a cada 3 s
     var abertosEm: Double = 0
     var iconeAtual = ""
+    var tituloAtual = ""
     var hotKeyRef: EventHotKeyRef?
     var tratadorInstalado = false
     var silencio = false     // modo ligação: segura a fila, não só a fala atual      // evita recriar e redesenhar o ícone 3x por segundo
@@ -335,6 +337,18 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         guard n != iconeAtual else { return }
         iconeAtual = n
         item.button?.image = sym(n)
+    }
+
+    /// Nome de quem está falando, ao lado do ícone. Vazio mostra só o ícone.
+    /// Como o ícone, só mexe na barra quando o texto muda.
+    func titulo(_ nome: String) {
+        var t = nome.trimmingCharacters(in: .whitespacesAndNewlines)
+        // a barra é dividida com os outros apps; nome longo vira reticências
+        if t.count > MAX_TITULO { t = String(t.prefix(MAX_TITULO - 1)).trimmingCharacters(in: .whitespaces) + "…" }
+        guard t != tituloAtual, let b = item.button else { return }
+        tituloAtual = t
+        b.title = t.isEmpty ? "" : " " + t
+        b.imagePosition = t.isEmpty ? .imageOnly : .imageLeading
     }
 
     func sym(_ n: String) -> NSImage? {
@@ -1642,6 +1656,9 @@ final class Controller: NSObject, NSApplicationDelegate, AVAudioPlayerDelegate, 
         skipItem.isEnabled = player != nil || fase != .parado
 
         let who = nowProj.isEmpty ? "" : " · \(nowProj)"
+        // ao lado do ícone, o nome de quem fala, do anúncio ao fim do conteúdo,
+        // inclusive pausado; parado ou em silêncio, só o ícone
+        titulo(!silencio && (player != nil || fase != .parado) ? nowProj : "")
         if silencio {
             icone("moon.zzz.fill")
             let espera = queued.count + (player != nil ? 1 : 0)

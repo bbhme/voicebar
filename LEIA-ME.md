@@ -10,6 +10,8 @@ resumo opcional envia texto para a OpenAI.
 
 Depois de instalado, aparece um ícone de alto-falante na barra de menus, com
 pausa, volume, velocidade, fila e sete vozes brasileiras para escolher.
+Enquanto uma fala acontece, o nome do projeto que está falando aparece ao lado
+do ícone.
 
 ---
 
