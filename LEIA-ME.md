@@ -4,6 +4,10 @@ Faz o seu Mac ler em voz alta as respostas do Claude Code, e qualquer texto que
 você selecionar. A voz é gerada dentro do seu próprio computador: não usa
 internet, não pede cadastro e não tem limite de uso.
 
+**Veja como funciona** (1 min 27 s, com som):
+
+https://github.com/user-attachments/assets/a72261dd-ea76-44d7-8737-9766a088dfa4
+
 **Antes de instalar, leia o `SECURITY.md`.** Em resumo: isto instala um gatilho
 que lê o texto de toda resposta do Claude Code, que é como ele funciona, e o
 resumo opcional envia texto para a OpenAI.

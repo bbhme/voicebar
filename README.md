@@ -3,6 +3,10 @@
 Reads Claude Code answers out loud on your Mac, plus any text you select.
 Speech is generated on your own machine: no internet, no account, no usage cap.
 
+**Demo** (1:27, with sound, narrated in Brazilian Portuguese):
+
+https://github.com/user-attachments/assets/a72261dd-ea76-44d7-8737-9766a088dfa4
+
 A speaker icon appears in the menu bar with pause, volume, speed, a queue and
 seven Brazilian Portuguese voices.
 
